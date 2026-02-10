@@ -16,6 +16,10 @@ module.exports = {
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig]
   },
+  transformIgnorePatterns: [
+    '/node_modules/(?!(.pnpm|uuid)/)',
+    '/node_modules/.pnpm/(?!(uuid@))'
+  ],
   moduleFileExtensions: ['ts', 'js', 'html'],
   coverageDirectory: 'test-output/jest/coverage'
 };

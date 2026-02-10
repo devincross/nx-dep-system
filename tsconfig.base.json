@@ -16,6 +16,11 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "es2022",
-    "customConditions": ["@org/source"]
+    "customConditions": ["@org/source"],
+    "baseUrl": ".",
+    "paths": {
+      "@org/database": ["libs/database/src/index.ts"],
+      "@org/database/*": ["libs/database/src/*"]
+    }
   }
 }

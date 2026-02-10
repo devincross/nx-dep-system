@@ -8,6 +8,15 @@
     },
     {
       "path": "./apps/admin-api"
+    },
+    {
+      "path": "./libs/database"
+    },
+    {
+      "path": "./apps/client-api"
+    },
+    {
+      "path": "./apps/landlord-admin"
     }
   ]
 }

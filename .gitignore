@@ -42,3 +42,13 @@ Thumbs.db
 .nx/workspace-data
 
 test-output
+
+# Environment files (except examples)
+.env
+.env.local
+.env.*.local
+
+# Docker
+.env.docker
+
+vite.config.*.timestamp*

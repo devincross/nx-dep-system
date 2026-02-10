@@ -1,10 +1,19 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AppController } from './app.controller.js';
+import { AppService } from './app.service.js';
+import { TenantModule } from '../tenant/tenant.module.js';
+import { DomainModule } from '../domain/domain.module.js';
+import { AuthModule } from '../auth/auth.module.js';
+import { createLandlordConnection } from '@org/database';
 
 @Module({
-  imports: [],
+  imports: [TenantModule, DomainModule, AuthModule],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements OnModuleInit {
+  async onModuleInit() {
+    // Initialize the landlord database connection on app startup
+    await createLandlordConnection();
+  }
+}
