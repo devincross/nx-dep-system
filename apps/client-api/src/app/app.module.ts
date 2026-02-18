@@ -18,7 +18,7 @@ export class AppModule implements NestModule {
     // Apply tenant middleware to all routes except health check
     consumer
       .apply(TenantMiddleware)
-      .exclude('api/health')
+      .exclude('health')
       .forRoutes('*');
   }
 }

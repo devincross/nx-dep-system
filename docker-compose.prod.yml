@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # Admin API - Landlord management API
+  admin-api:
+    build:
+      context: .
+      dockerfile: apps/admin-api/Dockerfile
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-org}/admin-api:${IMAGE_TAG:-latest}
+    container_name: dep-admin-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LANDLORD_DB_HOST=${LANDLORD_DB_HOST:-host.docker.internal}
+      - LANDLORD_DB_PORT=${LANDLORD_DB_PORT:-3307}
+      - LANDLORD_DB_NAME=${LANDLORD_DB_NAME:-landlord_db}
+      - LANDLORD_DB_USER=${LANDLORD_DB_USER}
+      - LANDLORD_DB_PASSWORD=${LANDLORD_DB_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - dep-network
+
+  # Client API - Multi-tenant API
+  client-api:
+    build:
+      context: .
+      dockerfile: apps/client-api/Dockerfile
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-org}/client-api:${IMAGE_TAG:-latest}
+    container_name: dep-client-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - LANDLORD_DB_HOST=${LANDLORD_DB_HOST:-host.docker.internal}
+      - LANDLORD_DB_PORT=${LANDLORD_DB_PORT:-3307}
+      - LANDLORD_DB_NAME=${LANDLORD_DB_NAME:-landlord_db}
+      - LANDLORD_DB_USER=${LANDLORD_DB_USER}
+      - LANDLORD_DB_PASSWORD=${LANDLORD_DB_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEYS=${ENCRYPTION_KEYS}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - dep-network
+
+  # Landlord Admin - Vue.js Admin Dashboard
+  landlord-admin:
+    build:
+      context: .
+      dockerfile: apps/landlord-admin/Dockerfile
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-org}/landlord-admin:${IMAGE_TAG:-latest}
+    container_name: dep-landlord-admin
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dep-network
+
+  # Client Portal - Vue.js Multi-tenant Portal
+  client-portal:
+    build:
+      context: .
+      dockerfile: apps/client-portal/Dockerfile
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-org}/client-portal:${IMAGE_TAG:-latest}
+    container_name: dep-client-portal
+    restart: unless-stopped
+    ports:
+      - "4201:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dep-network
+
+networks:
+  dep-network:
+    driver: bridge
+

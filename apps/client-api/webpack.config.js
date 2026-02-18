@@ -18,8 +18,8 @@ module.exports = {
       assets: ["./src/assets"],
       optimization: false,
       outputHashing: 'none',
-      generatePackageJson: false,
-      sourceMap: true,
+      generatePackageJson: true,
+      sourceMap: process.env.NODE_ENV !== 'production',
     })
   ],
 };

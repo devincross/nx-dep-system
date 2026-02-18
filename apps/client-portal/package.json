@@ -1,0 +1,12 @@
+{
+  "name": "@org/client-portal",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "@mdi/font": "^7.4.47",
+    "axios": "^1.13.5",
+    "pinia": "^3.0.4",
+    "vuetify": "^3.11.8"
+  }
+}
+
