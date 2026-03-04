@@ -60,10 +60,72 @@ jobs:
       - name: Test
         run: pnpm exec nx run-many --target=test --all --parallel=3
 
-  build:
-    name: Build Docker Images
+  # Detect which apps are affected by the changes
+  detect-affected:
+    name: Detect Affected Apps
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      affected: ${{ steps.affected.outputs.affected }}
+      affected_count: ${{ steps.affected.outputs.affected_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get affected apps
+        id: affected
+        run: |
+          # Get the base commit (previous commit on main)
+          BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+
+          # Get affected projects
+          AFFECTED=$(pnpm exec nx show projects --affected --base=$BASE_SHA --type=app 2>/dev/null || echo "")
+
+          # Filter to only our deployable apps
+          APPS=""
+          for app in admin-api client-api landlord-admin client-portal; do
+            if echo "$AFFECTED" | grep -q "^$app$\|@org/$app"; then
+              if [ -z "$APPS" ]; then
+                APPS="\"$app\""
+              else
+                APPS="$APPS,\"$app\""
+              fi
+            fi
+          done
+
+          # If no affected apps found or this is a fresh deploy, build all
+          if [ -z "$APPS" ]; then
+            echo "No affected apps detected, building all apps"
+            APPS='"admin-api","client-api","landlord-admin","client-portal"'
+          fi
+
+          echo "Affected apps: [$APPS]"
+          echo "affected=[$APPS]" >> $GITHUB_OUTPUT
+
+          # Count affected apps
+          COUNT=$(echo "[$APPS]" | jq '. | length')
+          echo "affected_count=$COUNT" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build Docker Images
+    needs: detect-affected
+    runs-on: ubuntu-latest
+    if: needs.detect-affected.outputs.affected_count > 0
     permissions:
       contents: read
       packages: write
@@ -71,7 +133,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        app: [admin-api, client-api, landlord-admin, client-portal]
+        app: ${{ fromJson(needs.detect-affected.outputs.affected) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,9 +178,9 @@ jobs:
 
   deploy:
     name: Deploy to Linode
-    needs: build
+    needs: [detect-affected, build]
     runs-on: ubuntu-latest
-    if: always() && needs.build.result != 'failure' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped') && github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
     steps:
       - name: Checkout
@@ -191,7 +253,7 @@ jobs:
 
   notify:
     name: Notify on Failure
-    needs: [build, deploy]
+    needs: [detect-affected, build, deploy]
     runs-on: ubuntu-latest
     if: failure()
     steps:
