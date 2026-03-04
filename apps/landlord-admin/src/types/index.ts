@@ -46,6 +46,7 @@ export interface Tenant {
 export interface CreateTenantDto {
   name: string;
   slug: string;
+  subdomain: string;
   isActive?: boolean;
   metadata?: string;
 }

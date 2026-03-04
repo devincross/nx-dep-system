@@ -14,6 +14,7 @@ const error = ref('');
 const form = ref({
   name: '',
   slug: '',
+  subdomain: '',
   isActive: true,
 });
 
@@ -24,6 +25,7 @@ onMounted(async () => {
       form.value = {
         name: tenant.name,
         slug: tenant.slug,
+        subdomain: '', // Not editable after creation
         isActive: tenant.isActive,
       };
     } catch (err) {
@@ -37,7 +39,9 @@ async function handleSubmit() {
   error.value = '';
   try {
     if (isEditing.value) {
-      await tenantsStore.updateTenant(route.params.id as string, form.value);
+      // Don't send subdomain when editing
+      const { subdomain, ...updateData } = form.value;
+      await tenantsStore.updateTenant(route.params.id as string, updateData);
     } else {
       await tenantsStore.createTenant(form.value);
     }
@@ -49,11 +53,13 @@ async function handleSubmit() {
   }
 }
 
-function generateSlug() {
-  form.value.slug = form.value.name
+function generateSlugAndSubdomain() {
+  const generated = form.value.name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
+  form.value.slug = generated;
+  form.value.subdomain = generated;
 }
 </script>
 
@@ -72,7 +78,7 @@ function generateSlug() {
             label="Name"
             required
             class="mb-4"
-            @blur="!isEditing && !form.slug && generateSlug()"
+            @blur="!isEditing && !form.slug && generateSlugAndSubdomain()"
           ></v-text-field>
           <v-text-field
             v-model="form.slug"
@@ -82,6 +88,19 @@ function generateSlug() {
             hint="URL-friendly identifier"
             persistent-hint
           ></v-text-field>
+          <v-text-field
+            v-if="!isEditing"
+            v-model="form.subdomain"
+            label="Subdomain"
+            required
+            class="mb-4"
+            hint="e.g., 'acme' will create acme.801saas.com"
+            persistent-hint
+            suffix=".801saas.com"
+          ></v-text-field>
+          <v-alert v-if="!isEditing" type="info" density="compact" class="mb-4">
+            A database will be automatically created: <strong>tenant_{{ form.slug?.replace(/-/g, '_') || 'xxx' }}</strong>
+          </v-alert>
           <v-switch
             v-model="form.isActive"
             label="Active"
