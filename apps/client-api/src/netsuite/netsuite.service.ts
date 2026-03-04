@@ -131,6 +131,7 @@ export class NetsuiteService {
 
   /**
    * Call the NetSuite order script
+   * Automatically includes: script, deploy, realm, type='orders'
    */
   async callOrderScript<T = unknown>(
     db: TenantDb,
@@ -139,11 +140,22 @@ export class NetsuiteService {
   ): Promise<NetsuiteResponse<T>> {
     const credential = await this.getNetsuiteCredential(db);
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
-    return this.makeRequest<T>(db, method, connectionData.netsuite_order_script_id, data);
+
+    // Add required parameters from credentials
+    const enrichedData: Record<string, unknown> = {
+      ...data,
+      script: connectionData.netsuite_order_script_id,
+      deploy: connectionData.netsuite_deploy_id,
+      realm: connectionData.netsuite_account,
+      type: 'orders',
+    };
+
+    return this.makeRequest<T>(db, method, connectionData.netsuite_order_script_id, enrichedData);
   }
 
   /**
    * Call the NetSuite account script
+   * Automatically includes: script, deploy, realm, type='customers'
    */
   async callAccountScript<T = unknown>(
     db: TenantDb,
@@ -152,7 +164,17 @@ export class NetsuiteService {
   ): Promise<NetsuiteResponse<T>> {
     const credential = await this.getNetsuiteCredential(db);
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
-    return this.makeRequest<T>(db, method, connectionData.netsuite_account_script_id, data);
+
+    // Add required parameters from credentials
+    const enrichedData: Record<string, unknown> = {
+      ...data,
+      script: connectionData.netsuite_account_script_id,
+      deploy: connectionData.netsuite_deploy_id,
+      realm: connectionData.netsuite_account,
+      type: 'customers',
+    };
+
+    return this.makeRequest<T>(db, method, connectionData.netsuite_account_script_id, enrichedData);
   }
 }
 
