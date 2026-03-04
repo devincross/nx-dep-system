@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getLandlordDb, tenants, domains } from '@org/database';
+import { getLandlordDb, tenants, domains, Tenant, Domain } from '@org/database';
 import mysql from 'mysql2/promise';
 
 export interface TenantUsageReport {
@@ -32,15 +32,15 @@ export class ReportsService {
     const db = getLandlordDb();
 
     // Get all tenants with their primary domain
-    const allTenants = await db.select().from(tenants);
-    const allDomains = await db.select().from(domains);
+    const allTenants: Tenant[] = await db.select().from(tenants);
+    const allDomains: Domain[] = await db.select().from(domains);
 
     const tenantReports: TenantUsageReport[] = [];
 
     for (const tenant of allTenants) {
       // Find primary domain for this tenant
-      const tenantDomains = allDomains.filter(d => d.tenantId === tenant.id);
-      const primaryDomain = tenantDomains.find(d => d.isPrimary) || tenantDomains[0];
+      const tenantDomains = allDomains.filter((d: Domain) => d.tenantId === tenant.id);
+      const primaryDomain = tenantDomains.find((d: Domain) => d.isPrimary) || tenantDomains[0];
 
       if (!primaryDomain) {
         this.logger.warn(`No domain found for tenant ${tenant.name}`);

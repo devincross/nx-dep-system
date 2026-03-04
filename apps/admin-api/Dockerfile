@@ -15,8 +15,13 @@ RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY apps/admin-api/ ./apps/admin-api/
 COPY libs/database/ ./libs/database/
 COPY tsconfig.base.json ./
+COPY tsconfig.json ./
 COPY nx.json ./
 COPY eslint.config.mjs ./
+COPY pnpm-workspace.yaml ./
+
+# Build the database library first (dependency)
+RUN cd libs/database && pnpm exec tsc --build
 
 # Build the application
 RUN pnpm exec nx build @org/admin-api --configuration=production
