@@ -37,7 +37,8 @@ export interface Tenant {
   id: string;
   name: string;
   slug: string;
-  status: 'active' | 'inactive' | 'suspended';
+  isActive: boolean;
+  metadata?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,13 +46,15 @@ export interface Tenant {
 export interface CreateTenantDto {
   name: string;
   slug: string;
-  status?: 'active' | 'inactive' | 'suspended';
+  isActive?: boolean;
+  metadata?: string;
 }
 
 export interface UpdateTenantDto {
   name?: string;
   slug?: string;
-  status?: 'active' | 'inactive' | 'suspended';
+  isActive?: boolean;
+  metadata?: string;
 }
 
 // Domain types

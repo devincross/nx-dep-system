@@ -14,14 +14,8 @@ const error = ref('');
 const form = ref({
   name: '',
   slug: '',
-  status: 'active' as 'active' | 'inactive' | 'suspended',
+  isActive: true,
 });
-
-const statusOptions = [
-  { title: 'Active', value: 'active' },
-  { title: 'Inactive', value: 'inactive' },
-  { title: 'Suspended', value: 'suspended' },
-];
 
 onMounted(async () => {
   if (isEditing.value) {
@@ -30,7 +24,7 @@ onMounted(async () => {
       form.value = {
         name: tenant.name,
         slug: tenant.slug,
-        status: tenant.status,
+        isActive: tenant.isActive,
       };
     } catch (err) {
       error.value = 'Failed to load tenant';
@@ -88,12 +82,12 @@ function generateSlug() {
             hint="URL-friendly identifier"
             persistent-hint
           ></v-text-field>
-          <v-select
-            v-model="form.status"
-            :items="statusOptions"
-            label="Status"
+          <v-switch
+            v-model="form.isActive"
+            label="Active"
+            color="primary"
             class="mb-4"
-          ></v-select>
+          ></v-switch>
         </v-form>
       </v-card-text>
       <v-card-actions>
