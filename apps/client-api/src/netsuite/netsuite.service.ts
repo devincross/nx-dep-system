@@ -131,7 +131,8 @@ export class NetsuiteService {
 
   /**
    * Call the NetSuite order script
-   * Automatically includes: script, deploy, realm, type='orders'
+   * Automatically includes: realm, type='orders'
+   * Note: script and deploy are already added in buildRestletUrl
    */
   async callOrderScript<T = unknown>(
     db: TenantDb,
@@ -141,11 +142,9 @@ export class NetsuiteService {
     const credential = await this.getNetsuiteCredential(db);
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
 
-    // Add required parameters from credentials
+    // Add required parameters from credentials (script/deploy already in URL)
     const enrichedData: Record<string, unknown> = {
       ...data,
-      script: connectionData.netsuite_order_script_id,
-      deploy: connectionData.netsuite_deploy_id,
       realm: connectionData.netsuite_account,
       type: 'orders',
     };
@@ -155,7 +154,8 @@ export class NetsuiteService {
 
   /**
    * Call the NetSuite account script
-   * Automatically includes: script, deploy, realm, type='customers'
+   * Automatically includes: realm, type='customers'
+   * Note: script and deploy are already added in buildRestletUrl
    */
   async callAccountScript<T = unknown>(
     db: TenantDb,
@@ -165,11 +165,9 @@ export class NetsuiteService {
     const credential = await this.getNetsuiteCredential(db);
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
 
-    // Add required parameters from credentials
+    // Add required parameters from credentials (script/deploy already in URL)
     const enrichedData: Record<string, unknown> = {
       ...data,
-      script: connectionData.netsuite_account_script_id,
-      deploy: connectionData.netsuite_deploy_id,
       realm: connectionData.netsuite_account,
       type: 'customers',
     };
