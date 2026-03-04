@@ -10,12 +10,13 @@ on:
       deploy_only:
         description: 'Skip build and deploy existing images'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}
+  # Use lowercase for GHCR compatibility
+  IMAGE_PREFIX: devincross
 
 jobs:
   test:
@@ -63,16 +64,21 @@ jobs:
     name: Build Docker Images
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.deploy_only != 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
     strategy:
       matrix:
         app: [admin-api, client-api, landlord-admin, client-portal]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -92,9 +98,9 @@ jobs:
           tags: |
             type=sha,prefix=
             type=raw,value=latest
-            type=ref,event=branch
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,9 +110,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            GIT_SHA=${{ github.sha }}
+          provenance: false
+
+      - name: Output image digest
+        run: echo "Image pushed with digest ${{ steps.push.outputs.digest }}"
 
   deploy:
     name: Deploy to Linode
@@ -133,6 +140,7 @@ jobs:
           host: ${{ secrets.LINODE_HOST }}
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
+          envs: GHCR_PAT,GHCR_USER
           script: |
             set -e
             cd /opt/dep-platform
@@ -141,8 +149,8 @@ jobs:
             echo "Deployment started at $(date)"
             echo "Deploying commit: ${{ github.sha }}"
 
-            # Login to GitHub Container Registry
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Login to GitHub Container Registry using PAT
+            echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
             # Pull latest images
             docker compose -f docker-compose.prod.yml pull
@@ -169,7 +177,8 @@ jobs:
             echo "Deployment completed successfully!"
             docker compose -f docker-compose.prod.yml ps
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GHCR_USER: devincross
 
   notify:
     name: Notify on Failure
