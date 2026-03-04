@@ -72,45 +72,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          fetch-depth: 2
 
       - name: Get affected apps
         id: affected
         run: |
-          # Get the base commit (previous commit on main)
-          BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+          # Get changed files between this commit and previous
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD)
 
-          # Get affected projects
-          AFFECTED=$(pnpm exec nx show projects --affected --base=$BASE_SHA --type=app 2>/dev/null || echo "")
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
 
-          # Filter to only our deployable apps
+          # Determine which apps are affected
           APPS=""
+
+          # Check each app
           for app in admin-api client-api landlord-admin client-portal; do
-            if echo "$AFFECTED" | grep -q "^$app$\|@org/$app"; then
+            # App is affected if:
+            # 1. Files in apps/$app changed
+            # 2. Files in libs/ changed (shared code)
+            # 3. Root config files changed (package.json, etc)
+            if echo "$CHANGED_FILES" | grep -qE "^apps/$app/|^libs/|^package\.json|^pnpm-lock\.yaml|^nx\.json"; then
               if [ -z "$APPS" ]; then
                 APPS="\"$app\""
               else
                 APPS="$APPS,\"$app\""
               fi
+              echo "App $app is affected"
             fi
           done
 
-          # If no affected apps found or this is a fresh deploy, build all
+          # If no affected apps found, build all (safety fallback)
           if [ -z "$APPS" ]; then
-            echo "No affected apps detected, building all apps"
+            echo "No specific apps affected, building all apps"
             APPS='"admin-api","client-api","landlord-admin","client-portal"'
           fi
 
