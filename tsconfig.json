@@ -17,6 +17,9 @@
     },
     {
       "path": "./apps/landlord-admin"
+    },
+    {
+      "path": "./apps/client-portal"
     }
   ]
 }
