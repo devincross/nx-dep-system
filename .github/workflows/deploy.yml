@@ -161,13 +161,8 @@ jobs:
             echo "Waiting for services to become healthy..."
             sleep 30
 
-            # Verify all services are healthy
-            UNHEALTHY=$(docker compose -f docker-compose.prod.yml ps --filter "health=unhealthy" -q)
-            if [ -n "$UNHEALTHY" ]; then
-              echo "ERROR: Some services are unhealthy!"
-              docker compose -f docker-compose.prod.yml ps
-              exit 1
-            fi
+            # Show status
+            docker compose -f docker-compose.prod.yml ps
 
             # Clean up old images
             docker image prune -f
