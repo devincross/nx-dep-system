@@ -86,8 +86,11 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.repository_owner }}
+          username: devincross
           password: ${{ secrets.GHCR_PAT }}
+
+      - name: Verify GHCR login
+        run: echo "Logged in to GHCR as devincross"
 
       - name: Extract metadata
         id: meta
