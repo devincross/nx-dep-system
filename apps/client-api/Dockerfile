@@ -23,8 +23,8 @@ COPY pnpm-workspace.yaml ./
 # Build the database library first (dependency)
 RUN cd libs/database && pnpm exec tsc --build
 
-# Build the application
-RUN pnpm exec nx build @org/client-api --configuration=production
+# Sync Nx workspace and build the application
+RUN pnpm exec nx sync && pnpm exec nx build @org/client-api --configuration=production
 
 # Remove @org/* packages from dependencies (they're bundled)
 RUN cd apps/client-api/dist && \
