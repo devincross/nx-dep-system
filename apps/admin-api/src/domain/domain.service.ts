@@ -3,14 +3,21 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { getLandlordDb, domains, tenants, Domain } from '@org/database';
 import { CreateDomainDto, UpdateDomainDto } from './dto/index.js';
+import { DatabaseProvisioningService } from './database-provisioning.service.js';
 
 @Injectable()
 export class DomainService {
+  private readonly logger = new Logger(DomainService.name);
+
+  constructor(
+    private readonly databaseProvisioningService: DatabaseProvisioningService
+  ) {}
   async findAll(): Promise<Domain[]> {
     const db = getLandlordDb();
     return db.select().from(domains);
@@ -70,6 +77,23 @@ export class DomainService {
     if (existing.length > 0) {
       throw new ConflictException(
         `Domain "${createDomainDto.domain}" already exists`
+      );
+    }
+
+    // Provision the database (create it and run migrations)
+    this.logger.log(`Provisioning database for domain: ${createDomainDto.domain}`);
+    try {
+      await this.databaseProvisioningService.provisionDatabase({
+        host: createDomainDto.dbHost,
+        port: createDomainDto.dbPort ?? 3306,
+        user: createDomainDto.dbUser,
+        password: createDomainDto.dbPassword,
+        database: createDomainDto.dbName,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to provision database: ${error}`);
+      throw new BadRequestException(
+        `Failed to provision database: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
 
