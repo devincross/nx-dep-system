@@ -89,14 +89,31 @@ export class NetsuiteService {
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
 
     const client = this.createClient(connectionData);
-    const restletUrl = this.buildRestletUrl(connectionData, scriptId);
+    let restletUrl = this.buildRestletUrl(connectionData, scriptId);
+
+    // For GET requests, append data as query parameters instead of body
+    if (method === 'GET' && data && Object.keys(data).length > 0) {
+      const queryParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, String(value));
+        }
+      }
+      restletUrl += `&${queryParams.toString()}`;
+    }
 
     try {
-      const response = await client.request({
+      const requestOptions: { method: string; restletUrl: string; body?: string } = {
         method,
         restletUrl,
-        body: data ? JSON.stringify(data) : undefined,
-      });
+      };
+
+      // Only add body for non-GET requests
+      if (method !== 'GET' && data) {
+        requestOptions.body = JSON.stringify(data);
+      }
+
+      const response = await client.request(requestOptions);
 
       return {
         success: true,
