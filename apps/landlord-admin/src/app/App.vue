@@ -15,6 +15,7 @@ const menuItems = [
   { title: 'Users', icon: 'mdi-account-group', to: '/users' },
   { title: 'Tenants', icon: 'mdi-domain', to: '/tenants' },
   { title: 'Domains', icon: 'mdi-web', to: '/domains' },
+  { title: 'Reports', icon: 'mdi-chart-bar', to: '/reports' },
 ];
 
 function logout() {
@@ -29,7 +30,7 @@ function logout() {
     <template v-if="isAuthenticated">
       <v-app-bar color="primary" prominent>
         <v-app-bar-nav-icon @click="drawer = !drawer"></v-app-bar-nav-icon>
-        <v-toolbar-title>Landlord Admin</v-toolbar-title>
+        <v-toolbar-title>DEP Admin Portal</v-toolbar-title>
         <v-spacer></v-spacer>
         <v-menu>
           <template v-slot:activator="{ props }">
