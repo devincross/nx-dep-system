@@ -1,9 +1,10 @@
 // User types
 export interface User {
-  id: number;
-  name: string;
+  id: string;
   email: string;
-  status: 'active' | 'inactive' | 'suspended';
+  firstName?: string;
+  lastName?: string;
+  isActive: boolean;
   lastLoginAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -15,9 +16,10 @@ export interface LoginDto {
 }
 
 export interface RegisterDto {
-  name: string;
   email: string;
   password: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 export interface LoginResponse {
