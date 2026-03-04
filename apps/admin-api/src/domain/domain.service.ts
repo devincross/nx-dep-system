@@ -201,5 +201,34 @@ export class DomainService {
       };
     }
   }
+
+  async provisionDatabase(
+    id: string
+  ): Promise<{ success: boolean; message: string }> {
+    const domain = await this.findOne(id);
+
+    this.logger.log(`Provisioning database for domain: ${domain.domain}`);
+
+    try {
+      await this.databaseProvisioningService.provisionDatabase({
+        host: domain.dbHost,
+        port: domain.dbPort,
+        user: domain.dbUser,
+        password: domain.dbPassword,
+        database: domain.dbName,
+      });
+
+      return {
+        success: true,
+        message: `Database "${domain.dbName}" provisioned successfully`,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to provision database: ${error}`);
+      return {
+        success: false,
+        message: `Failed to provision database: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      };
+    }
+  }
 }
 

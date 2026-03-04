@@ -52,6 +52,11 @@ export const useDomainsStore = defineStore('domains', () => {
     return response.data;
   }
 
+  async function provisionDatabase(id: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.post<{ success: boolean; message: string }>(`/domains/${id}/provision`);
+    return response.data;
+  }
+
   return {
     domains,
     loading,
@@ -62,6 +67,7 @@ export const useDomainsStore = defineStore('domains', () => {
     updateDomain,
     deleteDomain,
     testConnection,
+    provisionDatabase,
   };
 });
 

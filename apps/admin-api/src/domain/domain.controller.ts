@@ -50,5 +50,10 @@ export class DomainController {
   testConnection(@Param('id') id: string) {
     return this.domainService.testConnection(id);
   }
+
+  @Post(':id/provision')
+  provisionDatabase(@Param('id') id: string) {
+    return this.domainService.provisionDatabase(id);
+  }
 }
 
