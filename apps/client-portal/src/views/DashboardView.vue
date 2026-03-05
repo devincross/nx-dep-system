@@ -145,6 +145,15 @@ onMounted(() => {
             {{ connectionTypeLabel }} Connection
           </v-card-title>
           <v-card-text>
+            <v-alert
+              v-if="connectionStatus?.expirationWarning"
+              :type="connectionStatus.expirationWarning.includes('expired') ? 'error' : 'warning'"
+              density="compact"
+              class="mb-3"
+            >
+              <v-icon left>mdi-certificate</v-icon>
+              {{ connectionStatus.expirationWarning }}
+            </v-alert>
             <v-list v-if="connectionStatus">
               <v-list-item>
                 <v-list-item-title>Connection Type</v-list-item-title>
@@ -159,6 +168,17 @@ onMounted(() => {
                 <v-list-item-subtitle>
                   <v-chip :color="connectionStatusColor" size="small">
                     {{ connectionStatusLabel }}
+                  </v-chip>
+                </v-list-item-subtitle>
+              </v-list-item>
+              <v-list-item v-if="connectionStatus.certificateExpiresAt">
+                <v-list-item-title>Certificate Expires</v-list-item-title>
+                <v-list-item-subtitle>
+                  <v-chip
+                    :color="connectionStatus.expirationWarning ? (connectionStatus.expirationWarning.includes('expired') ? 'error' : 'warning') : 'success'"
+                    size="small"
+                  >
+                    {{ new Date(connectionStatus.certificateExpiresAt).toLocaleDateString() }}
                   </v-chip>
                 </v-list-item-subtitle>
               </v-list-item>

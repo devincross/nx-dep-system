@@ -79,12 +79,16 @@ Find your NetSuite Account ID:
     "client_id": "your-client-id-from-step-2",
     "certificate_id": "your-certificate-id-from-step-4",
     "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    "certificate_pem": "-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJ...\n-----END CERTIFICATE-----",
     "netsuite_deploy_id": 1,
     "netsuite_order_script_id": "customscript_your_order_script",
     "netsuite_account_script_id": "customscript_your_account_script",
     "mapping_class": "App\\Repositories\\Tenant\\Netsuite\\Mappings\\YourMapping"
   }
 }
+```
+
+> **Note**: Including `certificate_pem` (the public certificate) allows the system to automatically track the certificate expiration date and display warnings in the dashboard.
 ```
 
 ### Update NetSuite Credential
@@ -101,6 +105,7 @@ Find your NetSuite Account ID:
     "client_id": "your-client-id",
     "certificate_id": "your-certificate-id",
     "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    "certificate_pem": "-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJ...\n-----END CERTIFICATE-----",
     "netsuite_deploy_id": 1,
     "netsuite_order_script_id": "customscript_your_order_script",
     "netsuite_account_script_id": "customscript_your_account_script",
@@ -147,6 +152,7 @@ For backwards compatibility with Token-Based Authentication:
 | `client_id` | OAuth2 | Client ID from integration record |
 | `certificate_id` | OAuth2 | Certificate ID from M2M setup |
 | `private_key` | OAuth2 | PEM-formatted private key |
+| `certificate_pem` | OAuth2 (recommended) | PEM-formatted public certificate for expiration tracking |
 | `netsuite_realm` | OAuth1 | Usually same as account ID |
 | `netsuite_consumer_key` | OAuth1 | Consumer key from integration |
 | `netsuite_consumer_secret` | OAuth1 | Consumer secret from integration |
@@ -156,6 +162,16 @@ For backwards compatibility with Token-Based Authentication:
 | `netsuite_order_script_id` | Yes | Script ID for orders RESTlet |
 | `netsuite_account_script_id` | Yes | Script ID for accounts/customers RESTlet |
 | `mapping_class` | Yes | PHP mapping class name (for legacy compatibility) |
+
+### Certificate Expiration Tracking
+
+When you include `certificate_pem` in your credentials, the system will:
+
+1. **Automatically parse** the certificate expiration date
+2. **Store** it as `certificate_expires_at` in the connection data
+3. **Display** the expiration date in the client portal dashboard
+4. **Show warnings** when the certificate is expiring within 30 days
+5. **Show errors** when the certificate has already expired
 
 ---
 

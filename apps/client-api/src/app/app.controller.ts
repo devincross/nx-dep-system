@@ -62,6 +62,24 @@ export class AppController {
         };
       }
 
+      // Extract expiration info from connection data
+      const connectionData = credential.connectionData as Record<string, unknown>;
+      const certificateExpiresAt = connectionData.certificate_expires_at as string | undefined;
+
+      // Check if certificate is expiring soon (within 30 days)
+      let expirationWarning: string | undefined;
+      if (certificateExpiresAt) {
+        const expiresAt = new Date(certificateExpiresAt);
+        const now = new Date();
+        const daysUntilExpiry = Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (daysUntilExpiry < 0) {
+          expirationWarning = 'Certificate has expired!';
+        } else if (daysUntilExpiry <= 30) {
+          expirationWarning = `Certificate expires in ${daysUntilExpiry} days`;
+        }
+      }
+
       return {
         connectionType,
         configured: true,
@@ -69,6 +87,8 @@ export class AppController {
         credentialId: credential.id,
         createdAt: credential.createdAt,
         updatedAt: credential.updatedAt,
+        certificateExpiresAt,
+        expirationWarning,
       };
     } catch (error) {
       return {

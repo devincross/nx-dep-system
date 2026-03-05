@@ -166,6 +166,8 @@ export interface ConnectionStatus {
   createdAt?: string;
   updatedAt?: string;
   message?: string;
+  certificateExpiresAt?: string;
+  expirationWarning?: string;
 }
 
 export interface HealthStatus {

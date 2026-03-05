@@ -1,17 +1,31 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { eq, isNull, and, desc } from 'drizzle-orm';
 import { TenantDb, credentials, Credential, ConnectionData } from '@org/database';
 import { CreateCredentialDto, UpdateCredentialDto } from './dto/index.js';
 import { EncryptionService } from '../encryption/encryption.service.js';
+import { CertificateParserService } from './certificate-parser.service.js';
 
 // Credential with decrypted connectionData
 export interface DecryptedCredential extends Omit<Credential, 'connectionData'> {
   connectionData: ConnectionData;
 }
 
+// NetSuite connection data with certificate fields
+interface NetsuiteConnectionData {
+  auth_type?: 'oauth1' | 'oauth2';
+  certificate_pem?: string;
+  certificate_expires_at?: string;
+  [key: string]: unknown;
+}
+
 @Injectable()
 export class CredentialsService {
-  constructor(private readonly encryptionService: EncryptionService) {}
+  private readonly logger = new Logger(CredentialsService.name);
+
+  constructor(
+    private readonly encryptionService: EncryptionService,
+    private readonly certificateParserService: CertificateParserService
+  ) {}
 
   /**
    * Decrypt a credential's connectionData
@@ -23,6 +37,40 @@ export class CredentialsService {
         credential.connectionData
       ),
     };
+  }
+
+  /**
+   * Process connection data to extract certificate expiration for NetSuite OAuth2
+   */
+  private processConnectionData(
+    type: string,
+    connectionData: ConnectionData
+  ): ConnectionData {
+    if (type !== 'netsuite') {
+      return connectionData;
+    }
+
+    const nsData = connectionData as NetsuiteConnectionData;
+
+    // Only process for OAuth2 with certificate
+    if (nsData.auth_type !== 'oauth2' || !nsData.certificate_pem) {
+      return connectionData;
+    }
+
+    // Parse certificate to get expiration date
+    const expirationDate = this.certificateParserService.getExpirationDate(
+      nsData.certificate_pem
+    );
+
+    if (expirationDate) {
+      this.logger.log(`Certificate expires at: ${expirationDate.toISOString()}`);
+      return {
+        ...connectionData,
+        certificate_expires_at: expirationDate.toISOString(),
+      };
+    }
+
+    return connectionData;
   }
 
   /**
@@ -105,10 +153,14 @@ export class CredentialsService {
   ): Promise<DecryptedCredential> {
     const now = new Date();
 
-    // Encrypt the connectionData before storing
-    const encryptedData = this.encryptionService.encryptJson(
+    // Process connection data (e.g., extract certificate expiration)
+    const processedConnectionData = this.processConnectionData(
+      createCredentialDto.type,
       createCredentialDto.connectionData
     );
+
+    // Encrypt the connectionData before storing
+    const encryptedData = this.encryptionService.encryptJson(processedConnectionData);
 
     const result = await db.insert(credentials).values({
       type: createCredentialDto.type,
@@ -132,13 +184,15 @@ export class CredentialsService {
     id: number,
     updateCredentialDto: UpdateCredentialDto
   ): Promise<DecryptedCredential> {
-    // Ensure credential exists
-    await this.findOne(db, id);
+    // Ensure credential exists and get current data
+    const existing = await this.findOne(db, id);
 
     // Build update object, encrypting connectionData if provided
     const updateData: Record<string, unknown> = {
       updatedAt: new Date(),
     };
+
+    const credType = updateCredentialDto.type ?? existing.type;
 
     if (updateCredentialDto.type !== undefined) {
       updateData['type'] = updateCredentialDto.type;
@@ -147,8 +201,13 @@ export class CredentialsService {
       updateData['status'] = updateCredentialDto.status;
     }
     if (updateCredentialDto.connectionData !== undefined) {
-      updateData['connectionData'] = this.encryptionService.encryptJson(
+      // Process connection data (e.g., extract certificate expiration)
+      const processedConnectionData = this.processConnectionData(
+        credType,
         updateCredentialDto.connectionData
+      );
+      updateData['connectionData'] = this.encryptionService.encryptJson(
+        processedConnectionData
       );
     }
 

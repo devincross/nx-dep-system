@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsUrl, IsInt, Min, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsUrl, IsInt, Min, IsOptional, IsIn, IsDateString } from 'class-validator';
 
 /**
  * DTO for validating NetSuite connection data.
@@ -33,6 +33,14 @@ export class NetsuiteConnectionDataDto {
   @IsOptional()
   @IsString()
   private_key?: string; // PEM format or base64 encoded
+
+  @IsOptional()
+  @IsString()
+  certificate_pem?: string; // Public certificate PEM for expiration parsing
+
+  @IsOptional()
+  @IsDateString()
+  certificate_expires_at?: string; // ISO date string of certificate expiration
 
   // OAuth 1.0a TBA fields (kept for backward compatibility)
   @IsOptional()
