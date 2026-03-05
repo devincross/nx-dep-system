@@ -48,12 +48,12 @@ export class SyncScheduler implements OnModuleInit {
   @Cron(CronExpression.EVERY_10_MINUTES)
   async handleSync() {
     this.logger.log('Starting scheduled sync for all tenants...');
-    
-    try {
-      const activeTenants = await this.getActiveTenants();
-      this.logger.log(`Found ${activeTenants.length} active tenants`);
 
-      for (const tenant of activeTenants) {
+    try {
+      const syncEnabledTenants = await this.getSyncEnabledTenants();
+      this.logger.log(`Found ${syncEnabledTenants.length} tenants with sync enabled`);
+
+      for (const tenant of syncEnabledTenants) {
         try {
           await this.syncTenant(tenant);
         } catch (error) {
@@ -68,13 +68,18 @@ export class SyncScheduler implements OnModuleInit {
   }
 
   /**
-   * Get all active tenants from landlord database
+   * Get all tenants with sync enabled from landlord database
    */
-  private async getActiveTenants() {
+  private async getSyncEnabledTenants() {
     const results = await landlordDb
       .select()
       .from(tenants)
-      .where(and(eq(tenants.isActive, true), isNull(tenants.deletedAt)));
+      .where(
+        and(
+          eq(tenants.isActive, true),
+          eq(tenants.syncEnabled, true)
+        )
+      );
 
     return results;
   }

@@ -30,6 +30,10 @@ export class UpdateTenantDto {
   isActive?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  syncEnabled?: boolean;
+
+  @IsOptional()
   @IsJSON()
   metadata?: string;
 }

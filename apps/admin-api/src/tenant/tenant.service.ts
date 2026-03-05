@@ -105,6 +105,7 @@ export class TenantService {
       name: createTenantDto.name,
       slug: createTenantDto.slug,
       isActive: createTenantDto.isActive ?? true,
+      syncEnabled: createTenantDto.syncEnabled ?? false,
       metadata: createTenantDto.metadata ?? null,
       createdAt: now,
       updatedAt: now,

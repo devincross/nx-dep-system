@@ -38,6 +38,7 @@ export interface Tenant {
   name: string;
   slug: string;
   isActive: boolean;
+  syncEnabled: boolean;
   metadata?: string;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +49,7 @@ export interface CreateTenantDto {
   slug: string;
   subdomain: string;
   isActive?: boolean;
+  syncEnabled?: boolean;
   metadata?: string;
 }
 
@@ -55,6 +57,7 @@ export interface UpdateTenantDto {
   name?: string;
   slug?: string;
   isActive?: boolean;
+  syncEnabled?: boolean;
   metadata?: string;
 }
 

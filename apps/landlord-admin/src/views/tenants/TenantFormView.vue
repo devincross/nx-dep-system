@@ -22,6 +22,7 @@ const form = ref({
   subdomain: '',
   connectionType: 'netsuite' as 'netsuite' | 'zoho',
   isActive: true,
+  syncEnabled: false,
 });
 
 onMounted(async () => {
@@ -35,6 +36,7 @@ onMounted(async () => {
         subdomain: '', // Not editable after creation
         connectionType: metadata.connectionType || 'netsuite',
         isActive: tenant.isActive,
+        syncEnabled: tenant.syncEnabled ?? false,
       };
     } catch (err) {
       error.value = 'Failed to load tenant';
@@ -126,6 +128,14 @@ function generateSlugAndSubdomain() {
             label="Active"
             color="primary"
             class="mb-4"
+          ></v-switch>
+          <v-switch
+            v-model="form.syncEnabled"
+            label="Enable Automatic Sync"
+            color="primary"
+            class="mb-4"
+            hint="When enabled, the system will automatically sync accounts and orders from the connected ERP"
+            persistent-hint
           ></v-switch>
         </v-form>
       </v-card-text>

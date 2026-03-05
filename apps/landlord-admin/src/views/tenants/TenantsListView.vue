@@ -50,6 +50,7 @@ function getStatusColor(status: string) {
           { title: 'Name', key: 'name' },
           { title: 'Slug', key: 'slug' },
           { title: 'Status', key: 'status' },
+          { title: 'Sync', key: 'syncEnabled' },
           { title: 'Created', key: 'createdAt' },
           { title: 'Actions', key: 'actions', sortable: false },
         ]"
@@ -58,6 +59,12 @@ function getStatusColor(status: string) {
         <template v-slot:item.status="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">
             {{ item.status }}
+          </v-chip>
+        </template>
+        <template v-slot:item.syncEnabled="{ item }">
+          <v-chip :color="item.syncEnabled ? 'success' : 'grey'" size="small">
+            <v-icon start size="small">{{ item.syncEnabled ? 'mdi-sync' : 'mdi-sync-off' }}</v-icon>
+            {{ item.syncEnabled ? 'Enabled' : 'Disabled' }}
           </v-chip>
         </template>
         <template v-slot:item.createdAt="{ item }">

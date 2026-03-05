@@ -37,6 +37,10 @@ export class CreateTenantDto {
   isActive?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  syncEnabled?: boolean;
+
+  @IsOptional()
   @IsJSON()
   metadata?: string;
 }
