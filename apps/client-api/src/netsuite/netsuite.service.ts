@@ -2,21 +2,34 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { NetsuiteApiClient } from 'netsuite-api-client';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
+import { NetsuiteOAuthService } from './netsuite-oauth.service.js';
 
 /**
  * NetSuite connection data interface matching the DTO fields
+ * Supports both OAuth 1.0a (TBA) and OAuth 2.0 (M2M)
  */
 export interface NetsuiteConnectionData {
+  // Auth type: 'oauth1' or 'oauth2' (default: 'oauth1')
+  auth_type?: 'oauth1' | 'oauth2';
+
   netsuite_restlet_host: string;
   netsuite_account: string;
-  client_id: string;
-  client_secret: string;
-  netsuite_realm: string;
-  netsuite_consumer_key: string;
-  netsuite_consumer_secret: string;
-  netsuite_token: string;
-  netsuite_token_secret: string;
-  netsuite_signature_algorithm: string;
+
+  // OAuth 2.0 M2M fields
+  client_id?: string;
+  certificate_id?: string;
+  private_key?: string;
+
+  // OAuth 1.0a TBA fields
+  client_secret?: string;
+  netsuite_realm?: string;
+  netsuite_consumer_key?: string;
+  netsuite_consumer_secret?: string;
+  netsuite_token?: string;
+  netsuite_token_secret?: string;
+  netsuite_signature_algorithm?: string;
+
+  // Common fields
   netsuite_deploy_id: number;
   netsuite_order_script_id: string;
   netsuite_account_script_id: string;
@@ -36,7 +49,10 @@ export interface NetsuiteResponse<T = unknown> {
 export class NetsuiteService {
   private readonly logger = new Logger(NetsuiteService.name);
 
-  constructor(private readonly credentialsService: CredentialsService) {}
+  constructor(
+    private readonly credentialsService: CredentialsService,
+    private readonly oauthService: NetsuiteOAuthService
+  ) {}
 
   /**
    * Get the newest active NetSuite credential for the tenant
@@ -78,6 +94,7 @@ export class NetsuiteService {
 
   /**
    * Make an authenticated request to NetSuite RESTlet
+   * Supports both OAuth 1.0a (TBA) and OAuth 2.0 (M2M)
    */
   async makeRequest<T = unknown>(
     db: TenantDb,
@@ -88,7 +105,6 @@ export class NetsuiteService {
     const credential = await this.getNetsuiteCredential(db);
     const connectionData = credential.connectionData as unknown as NetsuiteConnectionData;
 
-    const client = this.createClient(connectionData);
     let restletUrl = this.buildRestletUrl(connectionData, scriptId);
 
     // For GET requests, append data as query parameters instead of body
@@ -102,23 +118,15 @@ export class NetsuiteService {
       restletUrl += `&${queryParams.toString()}`;
     }
 
+    // Determine auth type (default to oauth1 for backward compatibility)
+    const authType = connectionData.auth_type || 'oauth1';
+
     try {
-      const requestOptions: { method: string; restletUrl: string; body?: string } = {
-        method,
-        restletUrl,
-      };
-
-      // Only add body for non-GET requests
-      if (method !== 'GET' && data) {
-        requestOptions.body = JSON.stringify(data);
+      if (authType === 'oauth2') {
+        return await this.makeOAuth2Request<T>(connectionData, method, restletUrl, data);
+      } else {
+        return await this.makeOAuth1Request<T>(connectionData, method, restletUrl, data);
       }
-
-      const response = await client.request(requestOptions);
-
-      return {
-        success: true,
-        data: response.data as T,
-      };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`NetSuite request error: ${errorMessage}`);
@@ -127,6 +135,83 @@ export class NetsuiteService {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Make request using OAuth 1.0a (TBA)
+   */
+  private async makeOAuth1Request<T>(
+    connectionData: NetsuiteConnectionData,
+    method: string,
+    restletUrl: string,
+    data?: Record<string, unknown>
+  ): Promise<NetsuiteResponse<T>> {
+    const client = this.createClient(connectionData);
+
+    const requestOptions: { method: string; restletUrl: string; body?: string } = {
+      method,
+      restletUrl,
+    };
+
+    // Only add body for non-GET requests
+    if (method !== 'GET' && data) {
+      requestOptions.body = JSON.stringify(data);
+    }
+
+    const response = await client.request(requestOptions);
+
+    return {
+      success: true,
+      data: response.data as T,
+    };
+  }
+
+  /**
+   * Make request using OAuth 2.0 (M2M)
+   */
+  private async makeOAuth2Request<T>(
+    connectionData: NetsuiteConnectionData,
+    method: string,
+    restletUrl: string,
+    data?: Record<string, unknown>
+  ): Promise<NetsuiteResponse<T>> {
+    // Get access token (cached or fresh)
+    const accessToken = await this.oauthService.getAccessToken({
+      accountId: connectionData.netsuite_account,
+      clientId: connectionData.client_id!,
+      certificateId: connectionData.certificate_id!,
+      privateKey: connectionData.private_key!,
+    });
+
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    const fetchOptions: RequestInit = {
+      method,
+      headers,
+    };
+
+    // Add body for non-GET requests
+    if (method !== 'GET' && data) {
+      fetchOptions.body = JSON.stringify(data);
+    }
+
+    this.logger.debug(`Making OAuth 2.0 request to: ${restletUrl}`);
+    const response = await fetch(restletUrl, fetchOptions);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`NetSuite API error: ${response.status} - ${errorText}`);
+    }
+
+    const responseData = await response.json();
+
+    return {
+      success: true,
+      data: responseData as T,
+    };
   }
 
   /**

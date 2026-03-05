@@ -38,6 +38,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(mysql2@3.16.3)
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
       mysql2:
         specifier: ^3.16.2
         version: 3.16.3
@@ -135,6 +138,9 @@ importers:
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
+      '@types/jsonwebtoken':
+        specifier: ^9.0.9
+        version: 9.0.10
       '@types/node':
         specifier: 20.19.9
         version: 20.19.9
@@ -210,6 +216,148 @@ importers:
       webpack-cli:
         specifier: ^5.1.4
         version: 5.1.4(webpack@5.105.0)
+
+  apps/admin-api:
+    dependencies:
+      '@nestjs/common':
+        specifier: ^11.0.0
+        version: 11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/platform-express@11.1.13)(reflect-metadata@0.1.14)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/core@11.1.13)
+      '@org/database':
+        specifier: workspace:*
+        version: link:../../libs/database
+      class-transformer:
+        specifier: '*'
+        version: 0.5.1
+      class-validator:
+        specifier: '*'
+        version: 0.14.3
+      drizzle-orm:
+        specifier: '*'
+        version: 0.45.1(mysql2@3.16.3)
+      mysql2:
+        specifier: '*'
+        version: 3.16.3
+      reflect-metadata:
+        specifier: ^0.1.13
+        version: 0.1.14
+      rxjs:
+        specifier: ^7.8.0
+        version: 7.8.2
+      tslib:
+        specifier: ^2.3.0
+        version: 2.8.1
+      uuid:
+        specifier: '*'
+        version: 13.0.0
+    devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/core@11.1.13)(@nestjs/platform-express@11.1.13)
+      '@types/uuid':
+        specifier: '*'
+        version: 10.0.0
+
+  apps/admin-api-e2e: {}
+
+  apps/client-api:
+    dependencies:
+      '@nestjs/common':
+        specifier: ^11.0.0
+        version: 11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/platform-express@11.1.13)(reflect-metadata@0.1.14)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/core@11.1.13)
+      '@org/database':
+        specifier: workspace:*
+        version: link:../../libs/database
+      class-transformer:
+        specifier: '*'
+        version: 0.5.1
+      class-validator:
+        specifier: '*'
+        version: 0.14.3
+      drizzle-orm:
+        specifier: '*'
+        version: 0.45.1(mysql2@3.16.3)
+      jsonwebtoken:
+        specifier: '*'
+        version: 9.0.3
+      mysql2:
+        specifier: '*'
+        version: 3.16.3
+      reflect-metadata:
+        specifier: ^0.1.13
+        version: 0.1.14
+      rxjs:
+        specifier: ^7.8.0
+        version: 7.8.2
+      tslib:
+        specifier: ^2.3.0
+        version: 2.8.1
+      uuid:
+        specifier: '*'
+        version: 13.0.0
+    devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.0.0
+        version: 11.1.13(@nestjs/common@11.1.13(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.1.14)(rxjs@7.8.2))(@nestjs/core@11.1.13)(@nestjs/platform-express@11.1.13)
+      '@types/express':
+        specifier: '*'
+        version: 5.0.6
+      '@types/uuid':
+        specifier: '*'
+        version: 10.0.0
+
+  apps/client-portal:
+    dependencies:
+      '@mdi/font':
+        specifier: ^7.4.47
+        version: 7.4.47
+      axios:
+        specifier: ^1.13.5
+        version: 1.13.5
+      pinia:
+        specifier: ^3.0.4
+        version: 3.0.4(typescript@5.9.3)(vue@3.5.27(typescript@5.9.3))
+      vuetify:
+        specifier: ^3.11.8
+        version: 3.11.8(typescript@5.9.3)(vue@3.5.27(typescript@5.9.3))
+
+  apps/landlord-admin:
+    dependencies:
+      '@mdi/font':
+        specifier: ^7.4.47
+        version: 7.4.47
+      axios:
+        specifier: ^1.13.5
+        version: 1.13.5
+      pinia:
+        specifier: ^3.0.4
+        version: 3.0.4(typescript@5.9.3)(vue@3.5.27(typescript@5.9.3))
+      vuetify:
+        specifier: ^3.11.8
+        version: 3.11.8(typescript@5.9.3)(vue@3.5.27(typescript@5.9.3))
+
+  libs/database:
+    dependencies:
+      drizzle-orm:
+        specifier: '*'
+        version: 0.45.1(mysql2@3.16.3)
+      mysql2:
+        specifier: '*'
+        version: 3.16.3
+      uuid:
+        specifier: '*'
+        version: 13.0.0
 
 packages:
 
