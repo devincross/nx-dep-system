@@ -142,17 +142,30 @@ export interface NetsuiteResponse<T = unknown> {
 }
 
 // Tenant info
+export type ConnectionType = 'netsuite' | 'zoho';
+
 export interface TenantInfo {
   tenant: {
     id: string;
     name: string;
     slug: string;
+    connectionType: ConnectionType;
   };
   domain: {
     id: string;
     domain: string;
     isPrimary: boolean;
   };
+}
+
+export interface ConnectionStatus {
+  connectionType: ConnectionType;
+  configured: boolean;
+  status: 'current' | 'disabled' | 'not_configured' | 'error';
+  credentialId?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  message?: string;
 }
 
 export interface HealthStatus {

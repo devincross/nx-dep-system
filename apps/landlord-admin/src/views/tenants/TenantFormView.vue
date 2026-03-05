@@ -11,10 +11,16 @@ const isEditing = computed(() => !!route.params.id);
 const loading = ref(false);
 const error = ref('');
 
+const connectionTypes = [
+  { title: 'NetSuite', value: 'netsuite' },
+  { title: 'Zoho', value: 'zoho' },
+];
+
 const form = ref({
   name: '',
   slug: '',
   subdomain: '',
+  connectionType: 'netsuite' as 'netsuite' | 'zoho',
   isActive: true,
 });
 
@@ -22,10 +28,12 @@ onMounted(async () => {
   if (isEditing.value) {
     try {
       const tenant = await tenantsStore.fetchTenant(route.params.id as string);
+      const metadata = tenant.metadata ? JSON.parse(tenant.metadata) : {};
       form.value = {
         name: tenant.name,
         slug: tenant.slug,
         subdomain: '', // Not editable after creation
+        connectionType: metadata.connectionType || 'netsuite',
         isActive: tenant.isActive,
       };
     } catch (err) {
@@ -38,12 +46,15 @@ async function handleSubmit() {
   loading.value = true;
   error.value = '';
   try {
+    const metadata = JSON.stringify({ connectionType: form.value.connectionType });
+
     if (isEditing.value) {
       // Don't send subdomain when editing
-      const { subdomain, ...updateData } = form.value;
-      await tenantsStore.updateTenant(route.params.id as string, updateData);
+      const { subdomain, connectionType, ...updateData } = form.value;
+      await tenantsStore.updateTenant(route.params.id as string, { ...updateData, metadata });
     } else {
-      await tenantsStore.createTenant(form.value);
+      const { connectionType, ...createData } = form.value;
+      await tenantsStore.createTenant({ ...createData, metadata });
     }
     router.push('/tenants');
   } catch (err: any) {
@@ -101,6 +112,15 @@ function generateSlugAndSubdomain() {
           <v-alert v-if="!isEditing" type="info" density="compact" class="mb-4">
             A database will be automatically created: <strong>tenant_{{ form.slug?.replace(/-/g, '_') || 'xxx' }}</strong>
           </v-alert>
+          <v-select
+            v-model="form.connectionType"
+            :items="connectionTypes"
+            label="Connection Type"
+            required
+            class="mb-4"
+            hint="The ERP system this tenant uses"
+            persistent-hint
+          ></v-select>
           <v-switch
             v-model="form.isActive"
             label="Active"
