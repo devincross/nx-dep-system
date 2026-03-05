@@ -1,0 +1,27 @@
+{
+  "name": "@org/sync-worker-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "sync-worker-e2e",
+    "implicitDependencies": [
+      "sync-worker"
+    ],
+    "targets": {
+      "e2e": {
+        "executor": "@nx/jest:jest",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "options": {
+          "jestConfig": "apps/sync-worker-e2e/jest.config.cts",
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "sync-worker:build",
+          "sync-worker:serve"
+        ]
+      }
+    }
+  }
+}

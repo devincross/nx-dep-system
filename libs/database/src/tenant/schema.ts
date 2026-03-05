@@ -76,9 +76,37 @@ export const credentials = mysqlTable('credentials', {
 export const accounts = mysqlTable('accounts', {
   id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
   externalAccountId: varchar('external_account_id', { length: 255 }),
+  depAccountId: varchar('dep_account_id', { length: 255 }), // DEP enrollment account ID
   name: varchar('name', { length: 255 }),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
+});
+
+// Sync status enum
+export const syncStatusEnum = ['success', 'error', 'running', 'pending'] as const;
+export type SyncStatusType = (typeof syncStatusEnum)[number];
+
+// Sync type enum
+export const syncTypeEnum = ['accounts', 'orders', 'full'] as const;
+export type SyncType = (typeof syncTypeEnum)[number];
+
+// Sync status table - tracks sync runs and their status
+export const syncStatus = mysqlTable('sync_status', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  syncType: mysqlEnum('sync_type', syncTypeEnum).notNull(),
+  status: mysqlEnum('status', syncStatusEnum).notNull(),
+  lastSyncAt: timestamp('last_sync_at'),
+  lastSuccessAt: timestamp('last_success_at'),
+  recordsProcessed: int('records_processed').default(0),
+  recordsCreated: int('records_created').default(0),
+  recordsUpdated: int('records_updated').default(0),
+  recordsErrored: int('records_errored').default(0),
+  errorMessage: text('error_message'),
+  errorDetails: text('error_details'), // JSON string with detailed error info
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // Order status enum
@@ -190,4 +218,6 @@ export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
+export type SyncStatus = typeof syncStatus.$inferSelect;
+export type NewSyncStatus = typeof syncStatus.$inferInsert;
 
