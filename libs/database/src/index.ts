@@ -44,6 +44,9 @@ export {
   accountsRelations,
   ordersRelations,
   orderItemsRelations,
+  syncStatus,
+  syncStatusEnum,
+  syncTypeEnum,
 } from './tenant/schema.js';
 
 export type {
@@ -66,6 +69,10 @@ export type {
   NewOrderItem,
   OrderStatus,
   OrderItemDepStatus,
+  SyncStatus,
+  NewSyncStatus,
+  SyncStatusType,
+  SyncType,
 } from './tenant/schema.js';
 
 export {

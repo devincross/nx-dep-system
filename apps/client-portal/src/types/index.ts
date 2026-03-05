@@ -175,3 +175,31 @@ export interface HealthStatus {
   timestamp: string;
 }
 
+// Sync status types
+export type SyncStatusType = 'success' | 'error' | 'running' | 'pending';
+export type SyncType = 'accounts' | 'orders' | 'full';
+
+export interface SyncStatusResult {
+  syncType: SyncType;
+  status: SyncStatusType;
+  lastSyncAt?: string;
+  lastSuccessAt?: string;
+  recordsProcessed: number;
+  recordsCreated: number;
+  recordsUpdated: number;
+  recordsErrored: number;
+  errorMessage?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface SyncSummary {
+  accounts: SyncStatusResult | null;
+  orders: SyncStatusResult | null;
+  totals: {
+    totalAccounts: number;
+    totalOrders: number;
+    totalOrderItems: number;
+  };
+}
+

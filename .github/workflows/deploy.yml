@@ -87,7 +87,7 @@ jobs:
           APPS=""
 
           # Check each app
-          for app in admin-api client-api landlord-admin client-portal; do
+          for app in admin-api client-api landlord-admin client-portal sync-worker; do
             # App is affected if:
             # 1. Files in apps/$app changed
             # 2. Files in libs/ changed (shared code)
@@ -105,7 +105,7 @@ jobs:
           # If no affected apps found, build all (safety fallback)
           if [ -z "$APPS" ]; then
             echo "No specific apps affected, building all apps"
-            APPS='"admin-api","client-api","landlord-admin","client-portal"'
+            APPS='"admin-api","client-api","landlord-admin","client-portal","sync-worker"'
           fi
 
           echo "Affected apps: [$APPS]"
