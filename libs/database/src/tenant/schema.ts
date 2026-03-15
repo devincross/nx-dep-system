@@ -278,6 +278,50 @@ export const orderItemChangesRelations = relations(orderItemChanges, ({ one }) =
   }),
 }));
 
+// DEP transaction status enum
+export const depTransactionStatusEnum = ['pending', 'in_progress', 'complete', 'error', 'posted_with_errors'] as const;
+export type DepTransactionStatus = (typeof depTransactionStatusEnum)[number];
+
+// DEP order type enum
+export const depOrderTypeEnum = ['OR', 'RE', 'VD', 'OV'] as const;
+export type DepOrderType = (typeof depOrderTypeEnum)[number];
+
+// DEP transactions table - tracks every Apple DEP API interaction (required 3-7 year retention)
+export const depTransactions = mysqlTable(
+  'dep_transactions',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true })
+      .primaryKey()
+      .autoincrement(),
+    orderId: bigint('order_id', { mode: 'number', unsigned: true })
+      .references(() => orders.id),
+    transactionId: varchar('transaction_id', { length: 255 }).notNull(), // our unique ID per request
+    deviceEnrollmentTransactionId: varchar('device_enrollment_transaction_id', { length: 512 }), // Apple's ID
+    orderType: mysqlEnum('order_type', depOrderTypeEnum).notNull(),
+    status: mysqlEnum('status', depTransactionStatusEnum).default('pending').notNull(),
+    requestPayload: text('request_payload'), // full JSON request (for audit)
+    responsePayload: text('response_payload'), // full JSON response (for audit)
+    errorCode: varchar('error_code', { length: 100 }),
+    errorMessage: text('error_message'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    index('dep_txn_order_id_idx').on(table.orderId),
+    index('dep_txn_transaction_id_idx').on(table.transactionId),
+    index('dep_txn_enrollment_id_idx').on(table.deviceEnrollmentTransactionId),
+    index('dep_txn_status_idx').on(table.status),
+  ]
+);
+
+export const depTransactionsRelations = relations(depTransactions, ({ one }) => ({
+  order: one(orders, {
+    fields: [depTransactions.orderId],
+    references: [orders.id],
+  }),
+}));
+
 // Types
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -299,4 +343,6 @@ export type OrderChange = typeof orderChanges.$inferSelect;
 export type NewOrderChange = typeof orderChanges.$inferInsert;
 export type OrderItemChange = typeof orderItemChanges.$inferSelect;
 export type NewOrderItemChange = typeof orderItemChanges.$inferInsert;
+export type DepTransaction = typeof depTransactions.$inferSelect;
+export type NewDepTransaction = typeof depTransactions.$inferInsert;
 

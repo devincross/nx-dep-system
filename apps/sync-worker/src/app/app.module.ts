@@ -8,6 +8,7 @@ import { PushChangesService } from './push-changes.service.js';
 
 // Application layer
 import { SyncAccountsUseCase, SyncOrdersUseCase, PushChangesUseCase } from '../application/index.js';
+import { DepEnrollUseCase } from '../application/dep-enroll.use-case.js';
 
 // Infrastructure layer
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
@@ -16,15 +17,18 @@ import { NetsuiteBaseMapper, ByuNetsuiteMapper } from '../infrastructure/adapter
 import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
 import { ZohoBaseMapper } from '../infrastructure/adapters/zoho/mappers/index.js';
 import { DownstreamSyncAdapter } from '../infrastructure/adapters/downstream/downstream-sync.adapter.js';
+import { DepSyncAdapter } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import {
   AccountRepository,
   OrderRepository,
   SyncStatusRepository,
   OrderChangeRepository,
 } from '../infrastructure/repositories/index.js';
+import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 
-// Scheduler
+// Schedulers
 import { SyncScheduler } from '../scheduler/sync.scheduler.js';
+import { DepPollScheduler } from '../scheduler/dep-poll.scheduler.js';
 
 @Module({
   imports: [ScheduleModule.forRoot()],
@@ -36,11 +40,13 @@ import { SyncScheduler } from '../scheduler/sync.scheduler.js';
     SyncAccountsUseCase,
     SyncOrdersUseCase,
     PushChangesUseCase,
+    DepEnrollUseCase,
     // Adapters
     MapperRegistry,
     NetsuiteAdapter,
     ZohoAdapter,
     DownstreamSyncAdapter,
+    DepSyncAdapter,
     // Mappers
     NetsuiteBaseMapper,
     ByuNetsuiteMapper,
@@ -50,8 +56,10 @@ import { SyncScheduler } from '../scheduler/sync.scheduler.js';
     OrderRepository,
     SyncStatusRepository,
     OrderChangeRepository,
-    // Scheduler
+    DepTransactionRepository,
+    // Schedulers
     SyncScheduler,
+    DepPollScheduler,
   ],
 })
 export class AppModule implements OnModuleInit {

@@ -19,6 +19,23 @@ CREATE TABLE `credentials` (
 	CONSTRAINT `credentials_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+CREATE TABLE `dep_transactions` (
+	`id` bigint unsigned AUTO_INCREMENT NOT NULL,
+	`order_id` bigint unsigned,
+	`transaction_id` varchar(255) NOT NULL,
+	`device_enrollment_transaction_id` varchar(512),
+	`order_type` enum('OR','RE','VD','OV') NOT NULL,
+	`status` enum('pending','in_progress','complete','error','posted_with_errors') NOT NULL DEFAULT 'pending',
+	`request_payload` text,
+	`response_payload` text,
+	`error_code` varchar(100),
+	`error_message` text,
+	`completed_at` timestamp,
+	`created_at` timestamp DEFAULT (now()),
+	`updated_at` timestamp DEFAULT (now()),
+	CONSTRAINT `dep_transactions_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
 CREATE TABLE `order_changes` (
 	`id` bigint unsigned AUTO_INCREMENT NOT NULL,
 	`order_id` bigint unsigned NOT NULL,
@@ -127,6 +144,7 @@ CREATE TABLE `users` (
 	CONSTRAINT `users_email_unique` UNIQUE(`email`)
 );
 --> statement-breakpoint
+ALTER TABLE `dep_transactions` ADD CONSTRAINT `dep_transactions_order_id_orders_id_fk` FOREIGN KEY (`order_id`) REFERENCES `orders`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `order_changes` ADD CONSTRAINT `order_changes_order_id_orders_id_fk` FOREIGN KEY (`order_id`) REFERENCES `orders`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `order_item_changes` ADD CONSTRAINT `order_item_changes_order_id_orders_id_fk` FOREIGN KEY (`order_id`) REFERENCES `orders`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `order_item_changes` ADD CONSTRAINT `order_item_changes_order_item_id_order_items_id_fk` FOREIGN KEY (`order_item_id`) REFERENCES `order_items`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -134,6 +152,10 @@ ALTER TABLE `order_items` ADD CONSTRAINT `order_items_order_id_orders_id_fk` FOR
 ALTER TABLE `orders` ADD CONSTRAINT `orders_account_id_accounts_id_fk` FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `user_roles` ADD CONSTRAINT `user_roles_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `user_roles` ADD CONSTRAINT `user_roles_role_id_roles_id_fk` FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX `dep_txn_order_id_idx` ON `dep_transactions` (`order_id`);--> statement-breakpoint
+CREATE INDEX `dep_txn_transaction_id_idx` ON `dep_transactions` (`transaction_id`);--> statement-breakpoint
+CREATE INDEX `dep_txn_enrollment_id_idx` ON `dep_transactions` (`device_enrollment_transaction_id`);--> statement-breakpoint
+CREATE INDEX `dep_txn_status_idx` ON `dep_transactions` (`status`);--> statement-breakpoint
 CREATE INDEX `order_changes_order_id_idx` ON `order_changes` (`order_id`);--> statement-breakpoint
 CREATE INDEX `order_changes_synced_at_idx` ON `order_changes` (`synced_at`);--> statement-breakpoint
 CREATE INDEX `order_item_changes_order_id_idx` ON `order_item_changes` (`order_id`);--> statement-breakpoint

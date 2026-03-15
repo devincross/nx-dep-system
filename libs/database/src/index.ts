@@ -53,6 +53,10 @@ export {
   orderItemChangeTypeEnum,
   orderChangesRelations,
   orderItemChangesRelations,
+  depTransactions,
+  depTransactionStatusEnum,
+  depOrderTypeEnum,
+  depTransactionsRelations,
 } from './tenant/schema.js';
 
 export type {
@@ -85,6 +89,10 @@ export type {
   NewOrderItemChange,
   OrderChangeType,
   OrderItemChangeType,
+  DepTransaction,
+  NewDepTransaction,
+  DepTransactionStatus,
+  DepOrderType,
 } from './tenant/schema.js';
 
 export {
