@@ -172,13 +172,13 @@ export class DepPushChangesUseCase {
     });
 
     const enrollData: OrderEnrollmentData[] = [{
-      orderNumber: order.externalOrderId,
-      orderDate: order.createdAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
+      orderNumber: order.depOrderId || order.externalOrderId,
+      orderDate: order.depOrderedAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
       orderType: 'OR',
       customerId,
       poNumber: order.po,
       deliveries: [{
-        deliveryNumber: `DEL_${order.externalOrderId}`,
+        deliveryNumber: `DEL_${order.depOrderId || order.externalOrderId}`,
         shipDate: order.depShippedAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
         devices: depItems.map((item) => ({ serialNumber: item.serialNumber })),
       }],
@@ -194,7 +194,7 @@ export class DepPushChangesUseCase {
       });
       // Store request
       await this.storeRequest(txnRepo, dbTxnId, request);
-      this.logger.log(`OR submitted for order ${order.externalOrderId}: ${response.deviceEnrollmentTransactionId || 'error'}`);
+      this.logger.log(`OR submitted for order ${order.depOrderId || order.externalOrderId}: ${response.deviceEnrollmentTransactionId || 'error'}`);
     } catch (err: any) {
       await txnRepo.updateStatus(dbTxnId, 'error', { errorMessage: err.message });
       throw err;
@@ -210,7 +210,7 @@ export class DepPushChangesUseCase {
   ) {
     const txnId = `TXN_${uuidv4()}`;
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    const returnOrderNumber = `${order.externalOrderId}_RE_${Date.now()}`;
+    const returnOrderNumber = `${order.depOrderId || order.externalOrderId}_RE_${Date.now()}`;
 
     const dbTxnId = await txnRepo.create({
       orderId: order.id,
@@ -226,7 +226,7 @@ export class DepPushChangesUseCase {
       customerId,
       poNumber: order.po,
       deliveries: [{
-        deliveryNumber: `RET_${order.externalOrderId}`,
+        deliveryNumber: `RET_${order.depOrderId || order.externalOrderId}`,
         shipDate: now,
         devices: removedItems.map((item) => ({ serialNumber: item.serialNumber })),
       }],
@@ -241,7 +241,7 @@ export class DepPushChangesUseCase {
         errorMessage: response.errorMessage,
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
-      this.logger.log(`RE submitted for order ${order.externalOrderId}: ${removedItems.length} devices`);
+      this.logger.log(`RE submitted for order ${order.depOrderId || order.externalOrderId}: ${removedItems.length} devices`);
     } catch (err: any) {
       await txnRepo.updateStatus(dbTxnId, 'error', { errorMessage: err.message });
       throw err;
@@ -266,8 +266,8 @@ export class DepPushChangesUseCase {
     });
 
     const enrollData: OrderEnrollmentData[] = [{
-      orderNumber: order.externalOrderId,
-      orderDate: order.createdAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
+      orderNumber: order.depOrderId || order.externalOrderId,
+      orderDate: order.depOrderedAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
       orderType: 'OV',
       customerId,
       poNumber: order.po,
@@ -287,7 +287,7 @@ export class DepPushChangesUseCase {
         errorMessage: response.errorMessage,
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
-      this.logger.log(`OV submitted for order ${order.externalOrderId}: ${depItems.length} devices`);
+      this.logger.log(`OV submitted for order ${order.depOrderId || order.externalOrderId}: ${depItems.length} devices`);
     } catch (err: any) {
       await txnRepo.updateStatus(dbTxnId, 'error', { errorMessage: err.message });
       throw err;
@@ -311,8 +311,8 @@ export class DepPushChangesUseCase {
     });
 
     const enrollData: OrderEnrollmentData[] = [{
-      orderNumber: order.externalOrderId,
-      orderDate: order.createdAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
+      orderNumber: order.depOrderId || order.externalOrderId,
+      orderDate: order.depOrderedAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
       orderType: 'VD',
       customerId,
       poNumber: order.po,
@@ -328,7 +328,7 @@ export class DepPushChangesUseCase {
         errorMessage: response.errorMessage,
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
-      this.logger.log(`VD submitted for order ${order.externalOrderId}`);
+      this.logger.log(`VD submitted for order ${order.depOrderId || order.externalOrderId}`);
     } catch (err: any) {
       await txnRepo.updateStatus(dbTxnId, 'error', { errorMessage: err.message });
       throw err;
@@ -354,13 +354,13 @@ export class DepPushChangesUseCase {
 
     // Adding devices to existing order — same order number, new delivery
     const enrollData: OrderEnrollmentData[] = [{
-      orderNumber: order.externalOrderId,
-      orderDate: order.createdAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
+      orderNumber: order.depOrderId || order.externalOrderId,
+      orderDate: order.depOrderedAt?.toISOString().replace(/\.\d+Z$/, 'Z') || now,
       orderType: 'OR',
       customerId,
       poNumber: order.po,
       deliveries: [{
-        deliveryNumber: `DEL_${order.externalOrderId}_${Date.now()}`,
+        deliveryNumber: `DEL_${order.depOrderId || order.externalOrderId}_${Date.now()}`,
         shipDate: now,
         devices: addedItems.map((item) => ({ serialNumber: item.serialNumber })),
       }],
@@ -375,7 +375,7 @@ export class DepPushChangesUseCase {
         errorMessage: response.errorMessage,
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
-      this.logger.log(`OR (add devices) submitted for order ${order.externalOrderId}: ${addedItems.length} devices`);
+      this.logger.log(`OR (add devices) submitted for order ${order.depOrderId || order.externalOrderId}: ${addedItems.length} devices`);
     } catch (err: any) {
       await txnRepo.updateStatus(dbTxnId, 'error', { errorMessage: err.message });
       throw err;

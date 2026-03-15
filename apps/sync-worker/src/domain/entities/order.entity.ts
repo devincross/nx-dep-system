@@ -37,6 +37,15 @@ export interface OrderEntity {
   
   /** Source system identifier */
   source?: string;
+
+  /** DEP order ID (used as orderNumber in Apple DEP API) */
+  depOrderId?: string;
+
+  /** DEP order date (used as orderDate in Apple DEP API) */
+  depOrderedAt?: Date;
+
+  /** DEP ship date (used as shipDate in Apple DEP API) */
+  depShippedAt?: Date;
 }
 
 /**

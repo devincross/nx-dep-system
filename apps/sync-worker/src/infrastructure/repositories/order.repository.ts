@@ -94,6 +94,9 @@ export class OrderRepository implements OrderRepositoryPort {
       status: 'waiting',
       po: order.po,
       source: order.source,
+      depOrderId: order.depOrderId,
+      depOrderedAt: order.depOrderedAt,
+      depShippedAt: order.depShippedAt,
       createdAt: now,
       updatedAt: now,
     });
@@ -134,6 +137,9 @@ export class OrderRepository implements OrderRepositoryPort {
       po: order.po,
       source: order.source,
       status: 'waiting',
+      depOrderId: order.depOrderId,
+      depOrderedAt: order.depOrderedAt,
+      depShippedAt: order.depShippedAt,
       createdAt: now,
       updatedAt: now,
       items: createdItems,
@@ -151,6 +157,15 @@ export class OrderRepository implements OrderRepositoryPort {
     }
     if (order.po !== undefined) {
       updateData['po'] = order.po;
+    }
+    if (order.depOrderId !== undefined) {
+      updateData['depOrderId'] = order.depOrderId;
+    }
+    if (order.depOrderedAt !== undefined) {
+      updateData['depOrderedAt'] = order.depOrderedAt;
+    }
+    if (order.depShippedAt !== undefined) {
+      updateData['depShippedAt'] = order.depShippedAt;
     }
 
     await db.update(orders).set(updateData).where(eq(orders.id, id));
@@ -203,6 +218,15 @@ export class OrderRepository implements OrderRepositoryPort {
     }
     if (existing.po !== incoming.po) {
       changedFields['po'] = { old: existing.po, new: incoming.po };
+    }
+    if (existing.depOrderId !== incoming.depOrderId && incoming.depOrderId !== undefined) {
+      changedFields['depOrderId'] = { old: existing.depOrderId, new: incoming.depOrderId };
+    }
+    if (incoming.depOrderedAt !== undefined && existing.depOrderedAt?.getTime() !== incoming.depOrderedAt?.getTime()) {
+      changedFields['depOrderedAt'] = { old: existing.depOrderedAt, new: incoming.depOrderedAt };
+    }
+    if (incoming.depShippedAt !== undefined && existing.depShippedAt?.getTime() !== incoming.depShippedAt?.getTime()) {
+      changedFields['depShippedAt'] = { old: existing.depShippedAt, new: incoming.depShippedAt };
     }
 
     // Only record order change if there are field changes

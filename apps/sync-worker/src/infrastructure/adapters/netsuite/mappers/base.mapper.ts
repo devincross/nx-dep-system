@@ -49,6 +49,9 @@ export class NetsuiteBaseMapper implements MapperPort {
       po: raw['otherrefnum'] ? String(raw['otherrefnum']) : undefined,
       items,
       source: 'netsuite',
+      depOrderId: raw['custbody_dep_order_id'] ? String(raw['custbody_dep_order_id']) : undefined,
+      depOrderedAt: raw['custbody_dep_ordered_at'] ? new Date(String(raw['custbody_dep_ordered_at'])) : undefined,
+      depShippedAt: raw['custbody_dep_shipped_at'] ? new Date(String(raw['custbody_dep_shipped_at'])) : undefined,
     };
   }
 

@@ -46,6 +46,9 @@ export class ZohoBaseMapper implements MapperPort {
       po: raw['PO_Number'] ? String(raw['PO_Number']) : undefined,
       items,
       source: 'zoho',
+      depOrderId: raw['DEP_Order_ID'] ? String(raw['DEP_Order_ID']) : undefined,
+      depOrderedAt: raw['DEP_Ordered_At'] ? new Date(String(raw['DEP_Ordered_At'])) : undefined,
+      depShippedAt: raw['DEP_Shipped_At'] ? new Date(String(raw['DEP_Shipped_At'])) : undefined,
     };
   }
 

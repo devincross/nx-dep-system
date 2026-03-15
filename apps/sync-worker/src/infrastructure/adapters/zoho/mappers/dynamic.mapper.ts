@@ -26,6 +26,9 @@ export interface FieldMappingsConfig {
     externalOrderStatus?: string;
     isDep?: string;
     po?: string;
+    depOrderId?: string;
+    depOrderedAt?: string;
+    depShippedAt?: string;
   };
   orderItems?: {
     /** Field on the order record that contains the line items array */
@@ -53,6 +56,9 @@ const DEFAULT_CONFIG: Required<FieldMappingsConfig> = {
     externalOrderStatus: 'Status',
     isDep: 'Is_DEP',
     po: 'PO_Number',
+    depOrderId: 'DEP_Order_ID',
+    depOrderedAt: 'DEP_Ordered_At',
+    depShippedAt: 'DEP_Shipped_At',
   },
   orderItems: {
     sourceField: 'Product_Details',
@@ -108,6 +114,15 @@ export class DynamicZohoMapper implements MapperPort {
         : undefined,
       items: this.mapOrderItems(raw),
       source: 'zoho',
+      depOrderId: resolveFieldPath(raw, this.orderCfg.depOrderId)
+        ? resolveFieldPathAsString(raw, this.orderCfg.depOrderId)
+        : undefined,
+      depOrderedAt: resolveFieldPath(raw, this.orderCfg.depOrderedAt)
+        ? new Date(resolveFieldPathAsString(raw, this.orderCfg.depOrderedAt))
+        : undefined,
+      depShippedAt: resolveFieldPath(raw, this.orderCfg.depShippedAt)
+        ? new Date(resolveFieldPathAsString(raw, this.orderCfg.depShippedAt))
+        : undefined,
     };
   }
 
