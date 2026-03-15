@@ -9,6 +9,7 @@ import { PushChangesService } from './push-changes.service.js';
 // Application layer
 import { SyncAccountsUseCase, SyncOrdersUseCase, PushChangesUseCase } from '../application/index.js';
 import { DepEnrollUseCase } from '../application/dep-enroll.use-case.js';
+import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
 
 // Infrastructure layer
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
@@ -29,6 +30,7 @@ import { DepTransactionRepository } from '../infrastructure/repositories/dep-tra
 // Schedulers
 import { SyncScheduler } from '../scheduler/sync.scheduler.js';
 import { DepPollScheduler } from '../scheduler/dep-poll.scheduler.js';
+import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
 
 @Module({
   imports: [ScheduleModule.forRoot()],
@@ -41,6 +43,7 @@ import { DepPollScheduler } from '../scheduler/dep-poll.scheduler.js';
     SyncOrdersUseCase,
     PushChangesUseCase,
     DepEnrollUseCase,
+    DepPushChangesUseCase,
     // Adapters
     MapperRegistry,
     NetsuiteAdapter,
@@ -60,6 +63,7 @@ import { DepPollScheduler } from '../scheduler/dep-poll.scheduler.js';
     // Schedulers
     SyncScheduler,
     DepPollScheduler,
+    DepPushScheduler,
   ],
 })
 export class AppModule implements OnModuleInit {
