@@ -55,6 +55,19 @@ const existingCredentials = ref<Credential[]>([]);
 const activeCredential = ref<Credential | null>(null);
 const activatingCredential = ref(false);
 
+// DEP CSR generation state
+const csrGenerating = ref(false);
+const csrResult = ref<{ privateKey: string; csrPem: string; subject: any } | null>(null);
+const csrCopied = ref(false);
+const depCsrForm = ref({
+  soldTo: '',
+  country: '',
+  state: '',
+  city: '',
+  organization: '',
+  organizationalUnit: '',
+});
+
 const credentialTypes: CredentialType[] = ['dep', 'zoho', 'netsuite', 'database', 'ssl'];
 const credentialStatuses: CredentialStatus[] = ['current', 'disabled'];
 
@@ -138,6 +151,15 @@ function buildConnectionData(): Record<string, unknown> {
 
   if (type.value === 'netsuite') {
     data['auth_type'] = netsuiteAuthType.value;
+  }
+
+  // Persist CSR form data so it can be pre-populated later
+  if (type.value === 'dep') {
+    if (depCsrForm.value.organization) data['csr_organization'] = depCsrForm.value.organization;
+    if (depCsrForm.value.organizationalUnit) data['csr_organizational_unit'] = depCsrForm.value.organizationalUnit;
+    if (depCsrForm.value.country) data['csr_country'] = depCsrForm.value.country;
+    if (depCsrForm.value.state) data['csr_state'] = depCsrForm.value.state;
+    if (depCsrForm.value.city) data['csr_city'] = depCsrForm.value.city;
   }
 
   if (type.value === 'zoho' && showFieldMappings.value) {
@@ -298,6 +320,57 @@ async function exchangeGrantToken() {
   }
 }
 
+// ---- DEP CSR Generation ----
+
+async function generateCsr() {
+  const f = depCsrForm.value;
+  if (!f.soldTo || !f.country || !f.state || !f.city || !f.organization) {
+    error.value = 'Please fill in all CSR fields (SoldTo, Country, State, City, Organization).';
+    return;
+  }
+  csrGenerating.value = true;
+  error.value = '';
+  csrResult.value = null;
+  try {
+    const response = await api.post('/credentials/generate-csr', {
+      soldTo: f.soldTo,
+      country: f.country,
+      state: f.state,
+      city: f.city,
+      organization: f.organization,
+      organizationalUnit: f.organizationalUnit || undefined,
+    });
+    csrResult.value = response.data;
+    // Auto-fill the private key into connection data
+    connectionData.value['ssl_key'] = response.data.privateKey;
+    successMessage.value = 'CSR generated. Download it and send to Apple. Save this credential to preserve the private key.';
+  } catch (err: any) {
+    error.value = err.response?.data?.message || 'Failed to generate CSR.';
+  } finally {
+    csrGenerating.value = false;
+  }
+}
+
+function downloadCsr() {
+  if (!csrResult.value) return;
+  const blob = new Blob([csrResult.value.csrPem], { type: 'application/pkcs10' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dep-csr-${depCsrForm.value.soldTo}.pem`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function copyCsrToClipboard() {
+  if (!csrResult.value) return;
+  try {
+    await navigator.clipboard.writeText(csrResult.value.csrPem);
+    csrCopied.value = true;
+    setTimeout(() => { csrCopied.value = false; }, 2000);
+  } catch { /* */ }
+}
+
 // Initialize connection data when type changes
 watch(type, (newType) => {
   if (!isEdit.value) {
@@ -366,6 +439,16 @@ async function loadCredential() {
 
     if (credential.type === 'zoho' && credential.connectionData['refresh_token']) {
       zohoConnected.value = true;
+    }
+
+    // Pre-populate CSR form from existing DEP credential data
+    if (credential.type === 'dep') {
+      depCsrForm.value.soldTo = (credential.connectionData['sap_sold_to'] as string) || '';
+      depCsrForm.value.organization = (credential.connectionData['csr_organization'] as string) || '';
+      depCsrForm.value.organizationalUnit = (credential.connectionData['csr_organizational_unit'] as string) || '';
+      depCsrForm.value.country = (credential.connectionData['csr_country'] as string) || '';
+      depCsrForm.value.state = (credential.connectionData['csr_state'] as string) || '';
+      depCsrForm.value.city = (credential.connectionData['csr_city'] as string) || '';
     }
 
     await loadExistingCredentials();
@@ -495,12 +578,113 @@ onMounted(() => {
           </v-row>
 
           <!-- Active credential info -->
-          <v-alert v-if="!isEdit && activeCredential && (type === 'netsuite' || type === 'zoho')" type="warning" variant="tonal" density="compact" class="mb-4">
+          <v-alert v-if="!isEdit && activeCredential && (type === 'netsuite' || type === 'zoho' || type === 'dep')" type="warning" variant="tonal" density="compact" class="mb-4">
             An active {{ type }} credential already exists (#{{ activeCredential.id }}).
             Save this as <strong>disabled</strong> to set it up without disrupting the current connection, then activate when ready.
           </v-alert>
 
           <v-divider class="my-4"></v-divider>
+
+          <!-- ==================== DEP CSR SECTION ==================== -->
+          <template v-if="type === 'dep'">
+            <h3 class="text-h6 mb-4">Certificate Setup</h3>
+            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              Apple DEP requires an SSL certificate for API authentication. Generate a CSR here,
+              send it to Apple, and they will return the signed certificate to complete the setup.
+              The current connection stays active until you activate the new credential.
+            </v-alert>
+
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
+                Step 1: Generate Certificate Signing Request (CSR)
+              </v-card-title>
+              <v-card-text>
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <v-text-field v-model="depCsrForm.soldTo" label="SoldTo Number" hint="10-digit SAP SoldTo (used in CN: GRX-<SoldTo>.ACC1914.Prod.AppleCare)" persistent-hint required density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <v-text-field v-model="depCsrForm.organization" label="Organization" hint="Legal company name" persistent-hint required density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                </v-row>
+                <v-row>
+                  <v-col cols="12" md="4">
+                    <v-text-field v-model="depCsrForm.organizationalUnit" label="Organizational Unit" hint="Department (optional)" persistent-hint density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                  <v-col cols="12" md="4">
+                    <v-text-field v-model="depCsrForm.city" label="City" required density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                  <v-col cols="12" md="2">
+                    <v-text-field v-model="depCsrForm.state" label="State" required density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                  <v-col cols="12" md="2">
+                    <v-text-field v-model="depCsrForm.country" label="Country" hint="2-letter" persistent-hint maxlength="2" counter required density="compact" variant="outlined"></v-text-field>
+                  </v-col>
+                </v-row>
+
+                <v-btn
+                  color="primary"
+                  variant="outlined"
+                  :loading="csrGenerating"
+                  @click="generateCsr"
+                  class="mt-2"
+                >
+                  <v-icon start>mdi-certificate</v-icon>
+                  Generate Key &amp; CSR
+                </v-btn>
+
+                <template v-if="csrResult">
+                  <v-alert type="success" variant="tonal" density="compact" class="mt-4 mb-3">
+                    <div><strong>CSR generated.</strong> CN: {{ csrResult.subject.commonName }}</div>
+                    <div class="text-caption mt-1">Private key has been saved to this credential. Download the CSR below and send it to Apple.</div>
+                  </v-alert>
+
+                  <div class="text-subtitle-2 mb-2">CSR (send this to Apple)</div>
+                  <v-textarea
+                    :model-value="csrResult.csrPem"
+                    readonly
+                    rows="6"
+                    variant="outlined"
+                    density="compact"
+                    class="font-monospace text-body-2"
+                  ></v-textarea>
+                  <div class="d-flex ga-2 mt-1">
+                    <v-btn size="small" variant="tonal" color="primary" @click="downloadCsr">
+                      <v-icon start size="small">mdi-download</v-icon>
+                      Download CSR
+                    </v-btn>
+                    <v-btn size="small" variant="tonal" :color="csrCopied ? 'success' : 'default'" @click="copyCsrToClipboard">
+                      <v-icon start size="small">{{ csrCopied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
+                      {{ csrCopied ? 'Copied' : 'Copy' }}
+                    </v-btn>
+                  </div>
+                </template>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
+                Step 2: Upload Signed Certificate from Apple
+              </v-card-title>
+              <v-card-text>
+                <v-alert type="info" variant="tonal" density="compact" class="mb-3">
+                  After Apple signs your CSR, paste the signed certificate PEM below.
+                  The private key was saved in Step 1 — do not regenerate it.
+                </v-alert>
+                <v-textarea
+                  v-model="connectionData['ssl_cert']"
+                  label="SSL Certificate (from Apple)"
+                  hint="Paste the PEM certificate Apple sent back"
+                  persistent-hint
+                  rows="4"
+                  variant="outlined"
+                  density="compact"
+                ></v-textarea>
+              </v-card-text>
+            </v-card>
+
+            <v-divider class="my-4"></v-divider>
+          </template>
 
           <!-- ==================== ZOHO CONNECT SECTION ==================== -->
           <template v-if="type === 'zoho'">
@@ -653,7 +837,8 @@ onMounted(() => {
               <v-col
                 v-if="!(type === 'zoho' && (field === 'client_id' || field === 'client_secret'))
                     && !(type === 'netsuite' && field === 'auth_type')
-                    && !(type === 'netsuite' && netsuiteAuthType === 'oauth2' && (field === 'private_key' || field === 'certificate_pem'))"
+                    && !(type === 'netsuite' && netsuiteAuthType === 'oauth2' && (field === 'private_key' || field === 'certificate_pem'))
+                    && !(type === 'dep' && (field === 'ssl_key' || field === 'ssl_cert'))"
                 cols="12" md="6"
               >
                 <v-textarea
@@ -778,7 +963,7 @@ onMounted(() => {
         <v-spacer></v-spacer>
         <!-- Save as disabled (draft) when there's an active credential of this type -->
         <v-btn
-          v-if="(type === 'netsuite' || type === 'zoho') && activeCredential && !isEdit"
+          v-if="(type === 'netsuite' || type === 'zoho' || type === 'dep') && activeCredential && !isEdit"
           variant="outlined"
           :loading="loading"
           @click="saveAsDraft"

@@ -17,6 +17,7 @@ import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { JwtAuthGuard } from '../auth/guards/index.js';
 import { CredentialsService } from './credentials.service.js';
 import { CertificateGeneratorService } from './certificate-generator.service.js';
+import { CsrGeneratorService } from './csr-generator.service.js';
 import { CreateCredentialDto, UpdateCredentialDto } from './dto/index.js';
 
 @Controller('credentials')
@@ -25,6 +26,7 @@ export class CredentialsController {
   constructor(
     private readonly credentialsService: CredentialsService,
     private readonly certificateGeneratorService: CertificateGeneratorService,
+    private readonly csrGeneratorService: CsrGeneratorService,
   ) {}
 
   @Get()
@@ -106,6 +108,35 @@ export class CredentialsController {
       validityDays: body.validityDays,
       commonName: body.commonName,
       organization: body.organization,
+    });
+  }
+
+  /**
+   * Generate a CSR (Certificate Signing Request) for Apple DEP.
+   *
+   * Returns the CSR PEM (to send to Apple) and the private key (to store).
+   * CN follows: GRX-<10DigitSoldTo>.ACC1914.Prod.AppleCare
+   */
+  @Post('generate-csr')
+  async generateCsr(
+    @Body() body: {
+      soldTo: string;
+      country: string;
+      state: string;
+      city: string;
+      organization: string;
+      organizationalUnit?: string;
+    },
+  ) {
+    const commonName = this.csrGeneratorService.buildDepCommonName(body.soldTo);
+
+    return this.csrGeneratorService.generate({
+      country: body.country,
+      state: body.state,
+      city: body.city,
+      organization: body.organization,
+      organizationalUnit: body.organizationalUnit,
+      commonName,
     });
   }
 

@@ -34,6 +34,31 @@ export class UpdateTenantDto {
   syncEnabled?: boolean;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  country?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  organizationName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  organizationalUnit?: string;
+
+  @IsOptional()
   @IsJSON()
   metadata?: string;
 }

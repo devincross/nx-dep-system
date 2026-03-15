@@ -19,8 +19,14 @@ export const tenants = mysqlTable('tenants', {
   name: varchar('name', { length: 255 }).notNull(),
   slug: varchar('slug', { length: 255 }).notNull().unique(),
   isActive: boolean('is_active').default(true).notNull(),
-  syncEnabled: boolean('sync_enabled').default(false).notNull(), // Enable automated sync job
-  metadata: text('metadata'), // JSON string for additional tenant info
+  syncEnabled: boolean('sync_enabled').default(false).notNull(),
+  // Company address (used for DEP CSR generation)
+  country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2
+  state: varchar('state', { length: 255 }),
+  city: varchar('city', { length: 255 }),
+  organizationName: varchar('organization_name', { length: 255 }),
+  organizationalUnit: varchar('organizational_unit', { length: 255 }),
+  metadata: text('metadata'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

@@ -39,6 +39,11 @@ export interface Tenant {
   slug: string;
   isActive: boolean;
   syncEnabled: boolean;
+  country?: string;
+  state?: string;
+  city?: string;
+  organizationName?: string;
+  organizationalUnit?: string;
   metadata?: string;
   createdAt: string;
   updatedAt: string;

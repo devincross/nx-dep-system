@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "0733687f-af89-4045-91dd-bb848a06abad",
+  "id": "ebe6844c-788e-4925-9532-3c70da1798c3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "domains": {
@@ -170,6 +170,41 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "country": {
+          "name": "country",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "city": {
+          "name": "city",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "organization_name": {
+          "name": "organization_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "organizational_unit": {
+          "name": "organizational_unit",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "metadata": {
           "name": "metadata",

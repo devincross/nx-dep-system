@@ -23,6 +23,11 @@ const form = ref({
   connectionType: 'netsuite' as 'netsuite' | 'zoho',
   isActive: true,
   syncEnabled: false,
+  country: '',
+  state: '',
+  city: '',
+  organizationName: '',
+  organizationalUnit: '',
 });
 
 onMounted(async () => {
@@ -33,10 +38,15 @@ onMounted(async () => {
       form.value = {
         name: tenant.name,
         slug: tenant.slug,
-        subdomain: '', // Not editable after creation
+        subdomain: '',
         connectionType: metadata.connectionType || 'netsuite',
         isActive: tenant.isActive,
         syncEnabled: tenant.syncEnabled ?? false,
+        country: tenant.country || '',
+        state: tenant.state || '',
+        city: tenant.city || '',
+        organizationName: tenant.organizationName || '',
+        organizationalUnit: tenant.organizationalUnit || '',
       };
     } catch (err) {
       error.value = 'Failed to load tenant';
@@ -51,7 +61,6 @@ async function handleSubmit() {
     const metadata = JSON.stringify({ connectionType: form.value.connectionType });
 
     if (isEditing.value) {
-      // Don't send subdomain when editing
       const { subdomain, connectionType, ...updateData } = form.value;
       await tenantsStore.updateTenant(route.params.id as string, { ...updateData, metadata });
     } else {
@@ -80,7 +89,7 @@ function generateSlugAndSubdomain() {
   <div>
     <h1 class="text-h4 mb-6">{{ isEditing ? 'Edit Tenant' : 'Create Tenant' }}</h1>
 
-    <v-card max-width="600">
+    <v-card max-width="700">
       <v-card-text>
         <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">
           {{ error }}
@@ -137,6 +146,29 @@ function generateSlugAndSubdomain() {
             hint="When enabled, the system will automatically sync accounts and orders from the connected ERP"
             persistent-hint
           ></v-switch>
+
+          <v-divider class="my-4"></v-divider>
+          <h3 class="text-h6 mb-4">Company Address (for DEP CSR generation)</h3>
+
+          <v-row>
+            <v-col cols="12" md="6">
+              <v-text-field v-model="form.organizationName" label="Organization Name" hint="Legal company name" persistent-hint></v-text-field>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field v-model="form.organizationalUnit" label="Organizational Unit" hint="Department (optional)" persistent-hint></v-text-field>
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col cols="12" md="4">
+              <v-text-field v-model="form.city" label="City"></v-text-field>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field v-model="form.state" label="State / Province"></v-text-field>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field v-model="form.country" label="Country Code" hint="2-letter ISO code (e.g. US)" persistent-hint maxlength="2" counter></v-text-field>
+            </v-col>
+          </v-row>
         </v-form>
       </v-card-text>
       <v-card-actions>
@@ -149,4 +181,3 @@ function generateSlugAndSubdomain() {
     </v-card>
   </div>
 </template>
-
