@@ -35,6 +35,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/orders/historical-import',
+      name: 'orders-historical-import',
+      component: () => import('../views/orders/HistoricalImportView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/orders/:id',
       name: 'orders-detail',
       component: () => import('../views/orders/OrderDetailView.vue'),
