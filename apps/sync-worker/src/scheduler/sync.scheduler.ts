@@ -9,7 +9,6 @@ import {
   tenantDomains,
   credentials,
   TenantDb,
-  migrateTenantDb,
 } from '@org/database';
 import { SyncAccountsUseCase } from '../application/sync-accounts.use-case.js';
 import { SyncOrdersUseCase } from '../application/sync-orders.use-case.js';
@@ -100,9 +99,6 @@ export class SyncScheduler implements OnModuleInit {
       : {};
     const connectionType = metadata.connectionType || 'netsuite';
 
-    // Run pending tenant migrations then connect
-    await this.migrateTenantDatabase(tenant.slug);
-
     // Connect to tenant database
     const tenantDb = await this.connectToTenantDb(tenant.slug);
     if (!tenantDb) {
@@ -167,21 +163,6 @@ export class SyncScheduler implements OnModuleInit {
     } finally {
       // Close tenant database connection
       // Note: In production, you might want to pool these connections
-    }
-  }
-
-  private async migrateTenantDatabase(slug: string): Promise<void> {
-    const dbName = `tenant_${slug.replace(/-/g, '_')}`;
-    try {
-      await migrateTenantDb({
-        host: process.env['DB_HOST'] || 'localhost',
-        port: parseInt(process.env['DB_PORT'] || '3306'),
-        user: process.env['DB_USER'] || 'root',
-        password: process.env['DB_PASSWORD'] || '',
-        database: dbName,
-      });
-    } catch (error) {
-      this.logger.error(`Failed to migrate tenant DB ${dbName}: ${error}`);
     }
   }
 

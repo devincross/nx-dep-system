@@ -13,7 +13,8 @@ import {
 import { TenantService } from './tenant.service.js';
 import { CreateTenantDto, UpdateTenantDto } from './dto/index.js';
 import { DomainService } from '../domain/domain.service.js';
-import { migrateTenantDb } from '@org/database';
+import { migrateLandlordDb, migrateTenantDb, getLandlordDb, tenants, domains } from '@org/database';
+import { sql } from 'drizzle-orm';
 
 @Controller('tenants')
 export class TenantController {
@@ -52,32 +53,62 @@ export class TenantController {
 
   /**
    * Run database migrations on all tenants.
-   * Iterates every tenant, finds their primary domain, and runs
-   * pending migrations against each tenant database.
+   *
+   * 1. Runs landlord migrations first (e.g. adding sync_enabled column)
+   * 2. Queries only id/slug from tenants (safe even if schema is outdated)
+   * 3. Joins domains to get DB credentials
+   * 4. Runs tenant migrations on each database
    */
   @Post('migrate-all')
   async migrateAll() {
-    this.logger.log('Starting migration for all tenants...');
+    this.logger.log('Running landlord migrations...');
+    await migrateLandlordDb();
 
-    const allTenants = await this.tenantService.findAll();
+    this.logger.log('Starting tenant migrations...');
+    const db = getLandlordDb();
+
+    // Minimal query — only the columns that have always existed
+    const rows = await db
+      .select({
+        tenantId: tenants.id,
+        slug: tenants.slug,
+        domainId: domains.id,
+        dbHost: domains.dbHost,
+        dbPort: domains.dbPort,
+        dbName: domains.dbName,
+        dbUser: domains.dbUser,
+        dbPassword: domains.dbPassword,
+        isPrimary: domains.isPrimary,
+      })
+      .from(tenants)
+      .innerJoin(domains, sql`${tenants.id} = ${domains.tenantId}`);
+
+    // Group by tenant, pick primary domain (or first)
+    const tenantMap = new Map<string, { slug: string; dbHost: string; dbPort: number; dbName: string; dbUser: string; dbPassword: string }>();
+    for (const row of rows) {
+      const existing = tenantMap.get(row.tenantId);
+      if (!existing || row.isPrimary) {
+        tenantMap.set(row.tenantId, {
+          slug: row.slug,
+          dbHost: row.dbHost,
+          dbPort: row.dbPort,
+          dbName: row.dbName,
+          dbUser: row.dbUser,
+          dbPassword: row.dbPassword,
+        });
+      }
+    }
+
     const results: { tenant: string; success: boolean; message: string }[] = [];
 
-    for (const tenant of allTenants) {
+    for (const [, tenant] of tenantMap) {
       try {
-        const tenantDomains = await this.domainService.findByTenantId(tenant.id);
-        const primaryDomain = tenantDomains.find((d) => d.isPrimary) ?? tenantDomains[0];
-
-        if (!primaryDomain) {
-          results.push({ tenant: tenant.slug, success: false, message: 'No domain configured' });
-          continue;
-        }
-
         await migrateTenantDb({
-          host: primaryDomain.dbHost,
-          port: primaryDomain.dbPort,
-          database: primaryDomain.dbName,
-          user: primaryDomain.dbUser,
-          password: primaryDomain.dbPassword,
+          host: tenant.dbHost,
+          port: tenant.dbPort,
+          database: tenant.dbName,
+          user: tenant.dbUser,
+          password: tenant.dbPassword,
         });
 
         results.push({ tenant: tenant.slug, success: true, message: 'Migrations applied' });
@@ -91,10 +122,9 @@ export class TenantController {
 
     const succeeded = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
-
     this.logger.log(`Migration complete: ${succeeded} succeeded, ${failed} failed`);
 
-    return { total: allTenants.length, succeeded, failed, results };
+    return { total: tenantMap.size, succeeded, failed, results };
   }
 }
 

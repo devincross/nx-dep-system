@@ -6,21 +6,10 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module.js';
-import { createLandlordConnection, migrateLandlordDb } from '@org/database';
+import { createLandlordConnection } from '@org/database';
 
 async function bootstrap() {
   const logger = new Logger('SyncWorker');
-
-  // Run pending landlord migrations then connect
-  logger.log('Running landlord database migrations...');
-  await migrateLandlordDb({
-    host: process.env['DB_HOST'] || 'localhost',
-    port: parseInt(process.env['DB_PORT'] || '3306'),
-    user: process.env['DB_USER'] || 'root',
-    password: process.env['DB_PASSWORD'] || '',
-    database: process.env['DB_NAME'] || 'landlord',
-  });
-  logger.log('Landlord migrations complete');
 
   // Initialize the landlord connection for the ORM
   await createLandlordConnection({
@@ -33,7 +22,6 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
 
-  // Enable validation pipe for DTO validation
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
