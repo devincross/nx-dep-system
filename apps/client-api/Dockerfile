@@ -47,8 +47,8 @@ COPY --from=builder /app/apps/client-api/dist ./
 # Copy database migration files (for auto-migrate on startup)
 COPY --from=builder /app/libs/database/drizzle ./drizzle
 
-# Install production dependencies
-RUN npm install --omit=dev --ignore-scripts
+# Install openssl (needed for certificate generation) and production dependencies
+RUN apk add --no-cache openssl && npm install --omit=dev --ignore-scripts
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
