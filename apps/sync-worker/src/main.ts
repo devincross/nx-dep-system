@@ -3,7 +3,7 @@
  * Runs scheduled jobs to sync accounts and orders from external sources
  */
 
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module.js';
 import { initializeLandlordDb } from '@org/database';
@@ -22,6 +22,16 @@ async function bootstrap() {
   });
 
   const app = await NestFactory.create(AppModule);
+
+  // Enable validation pipe for DTO validation
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    })
+  );
+
   const globalPrefix = 'api';
   app.setGlobalPrefix(globalPrefix);
 

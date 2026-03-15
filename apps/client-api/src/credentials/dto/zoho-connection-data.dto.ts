@@ -1,8 +1,55 @@
-import { IsString, IsNotEmpty, IsEmail, IsUrl } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsObject,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+class ZohoAccountFieldMappings {
+  @IsOptional() @IsString() externalAccountId?: string;
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() depAccountId?: string;
+}
+
+class ZohoOrderFieldMappings {
+  @IsOptional() @IsString() externalOrderId?: string;
+  @IsOptional() @IsString() externalAccountId?: string;
+  @IsOptional() @IsString() externalOrderStatus?: string;
+  @IsOptional() @IsString() isDep?: string;
+  @IsOptional() @IsString() po?: string;
+}
+
+class ZohoOrderItemFieldMappings {
+  @IsOptional() @IsString() sourceField?: string;
+  @IsOptional() @IsString() serialNumbers?: string;
+  @IsOptional() @IsString() isDep?: string;
+}
+
+class ZohoFieldMappings {
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ZohoAccountFieldMappings)
+  account?: ZohoAccountFieldMappings;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ZohoOrderFieldMappings)
+  order?: ZohoOrderFieldMappings;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ZohoOrderItemFieldMappings)
+  orderItems?: ZohoOrderItemFieldMappings;
+}
 
 /**
  * DTO for validating Zoho connection data.
- * All fields are required for Zoho credentials.
+ * Matches what the sync-worker's ZohoAdapter and DynamicZohoMapper consume.
  */
 export class ZohoConnectionDataDto {
   @IsString()
@@ -13,56 +60,29 @@ export class ZohoConnectionDataDto {
   @IsNotEmpty()
   client_secret!: string;
 
-  @IsUrl()
-  @IsNotEmpty()
-  redirect_uri!: string;
-
-  @IsEmail()
-  @IsNotEmpty()
-  current_user_email!: string;
-
   @IsString()
   @IsNotEmpty()
-  account_field!: string;
+  refresh_token!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  is_dep_field!: string;
+  api_domain?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  po_field!: string;
+  accounts_module?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  serials_field!: string;
+  orders_module?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  dep_status_field!: string;
+  mapping_class?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  status!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  dep_order_id!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  dep_ordered_at!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  dep_shipped_at!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  application_log_file_path!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  token_persistence_path!: string;
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ZohoFieldMappings)
+  field_mappings?: ZohoFieldMappings;
 }
-

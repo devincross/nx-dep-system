@@ -5,6 +5,14 @@
   "nx": {
     "name": "sync-worker",
     "targets": {
+      "test": {
+        "executor": "@nx/jest:jest",
+        "outputs": ["{projectRoot}/test-output/jest/coverage"],
+        "options": {
+          "jestConfig": "apps/sync-worker/jest.config.cts",
+          "passWithNoTests": true
+        }
+      },
       "build": {
         "executor": "nx:run-commands",
         "options": {

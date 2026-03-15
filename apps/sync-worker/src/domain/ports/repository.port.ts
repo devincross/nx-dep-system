@@ -3,6 +3,9 @@ import {
   PersistedAccountEntity,
   OrderEntity,
   PersistedOrderEntity,
+  OrderChangeEntity,
+  OrderItemChangeEntity,
+  UnsyncedChanges,
 } from '../entities/index.js';
 
 /**
@@ -54,20 +57,25 @@ export interface AccountRepositoryPort {
  */
 export interface OrderRepositoryPort {
   /**
+   * Find order by ID
+   */
+  findById(id: number): Promise<PersistedOrderEntity | null>;
+
+  /**
    * Find order by external ID
    */
   findByExternalId(externalOrderId: string): Promise<PersistedOrderEntity | null>;
-  
+
   /**
    * Create a new order with items
    */
   create(order: OrderEntity, accountId: number): Promise<PersistedOrderEntity>;
-  
+
   /**
    * Update an existing order
    */
   update(id: number, order: Partial<OrderEntity>): Promise<PersistedOrderEntity>;
-  
+
   /**
    * Upsert order (create or update based on external ID)
    */
@@ -115,9 +123,55 @@ export interface SyncStatusRepositoryPort {
 }
 
 /**
+ * Order change repository port interface
+ */
+export interface OrderChangeRepositoryPort {
+  /**
+   * Record an order change
+   */
+  recordOrderChange(change: Omit<OrderChangeEntity, 'id' | 'createdAt'>): Promise<OrderChangeEntity>;
+
+  /**
+   * Record an order item change
+   */
+  recordItemChange(change: Omit<OrderItemChangeEntity, 'id' | 'createdAt'>): Promise<OrderItemChangeEntity>;
+
+  /**
+   * Record multiple item changes at once
+   */
+  recordItemChanges(changes: Omit<OrderItemChangeEntity, 'id' | 'createdAt'>[]): Promise<OrderItemChangeEntity[]>;
+
+  /**
+   * Get all unsynced changes (where syncedAt is null)
+   */
+  findUnsyncedChanges(): Promise<UnsyncedChanges>;
+
+  /**
+   * Get unsynced changes for a specific order
+   */
+  findUnsyncedChangesByOrderId(orderId: number): Promise<UnsyncedChanges>;
+
+  /**
+   * Mark order changes as synced
+   */
+  markOrderChangesSynced(ids: number[]): Promise<void>;
+
+  /**
+   * Mark item changes as synced
+   */
+  markItemChangesSynced(ids: number[]): Promise<void>;
+
+  /**
+   * Mark all changes for an order as synced
+   */
+  markOrderFullySynced(orderId: number): Promise<void>;
+}
+
+/**
  * Tokens for dependency injection
  */
 export const ACCOUNT_REPOSITORY_PORT = Symbol('ACCOUNT_REPOSITORY_PORT');
 export const ORDER_REPOSITORY_PORT = Symbol('ORDER_REPOSITORY_PORT');
 export const SYNC_STATUS_REPOSITORY_PORT = Symbol('SYNC_STATUS_REPOSITORY_PORT');
+export const ORDER_CHANGE_REPOSITORY_PORT = Symbol('ORDER_CHANGE_REPOSITORY_PORT');
 

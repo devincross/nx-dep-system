@@ -3,9 +3,11 @@ import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { PushChangesController } from './push-changes.controller.js';
+import { PushChangesService } from './push-changes.service.js';
 
 // Application layer
-import { SyncAccountsUseCase, SyncOrdersUseCase } from '../application/index.js';
+import { SyncAccountsUseCase, SyncOrdersUseCase, PushChangesUseCase } from '../application/index.js';
 
 // Infrastructure layer
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
@@ -13,10 +15,12 @@ import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.ad
 import { NetsuiteBaseMapper, ByuNetsuiteMapper } from '../infrastructure/adapters/netsuite/mappers/index.js';
 import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
 import { ZohoBaseMapper } from '../infrastructure/adapters/zoho/mappers/index.js';
+import { DownstreamSyncAdapter } from '../infrastructure/adapters/downstream/downstream-sync.adapter.js';
 import {
   AccountRepository,
   OrderRepository,
   SyncStatusRepository,
+  OrderChangeRepository,
 } from '../infrastructure/repositories/index.js';
 
 // Scheduler
@@ -24,16 +28,19 @@ import { SyncScheduler } from '../scheduler/sync.scheduler.js';
 
 @Module({
   imports: [ScheduleModule.forRoot()],
-  controllers: [AppController],
+  controllers: [AppController, PushChangesController],
   providers: [
     AppService,
+    PushChangesService,
     // Use cases
     SyncAccountsUseCase,
     SyncOrdersUseCase,
+    PushChangesUseCase,
     // Adapters
     MapperRegistry,
     NetsuiteAdapter,
     ZohoAdapter,
+    DownstreamSyncAdapter,
     // Mappers
     NetsuiteBaseMapper,
     ByuNetsuiteMapper,
@@ -42,6 +49,7 @@ import { SyncScheduler } from '../scheduler/sync.scheduler.js';
     AccountRepository,
     OrderRepository,
     SyncStatusRepository,
+    OrderChangeRepository,
     // Scheduler
     SyncScheduler,
   ],

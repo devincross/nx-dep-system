@@ -253,6 +253,34 @@ export class CredentialsService {
   }
 
   /**
+   * Activate a credential and disable all other credentials of the same type.
+   * Used for credential rotation: new credential becomes 'current',
+   * all others of the same type become 'disabled'.
+   */
+  async activate(db: TenantDb, id: number): Promise<DecryptedCredential> {
+    const credential = await this.findOne(db, id);
+
+    // Disable all other credentials of the same type
+    await db
+      .update(credentials)
+      .set({ status: 'disabled', updatedAt: new Date() })
+      .where(
+        and(
+          eq(credentials.type, credential.type),
+          isNull(credentials.deletedAt)
+        )
+      );
+
+    // Set this one as current
+    await db
+      .update(credentials)
+      .set({ status: 'current', updatedAt: new Date() })
+      .where(eq(credentials.id, id));
+
+    return this.findOne(db, id);
+  }
+
+  /**
    * Restore a soft-deleted credential
    */
   async restore(db: TenantDb, id: number): Promise<DecryptedCredential> {

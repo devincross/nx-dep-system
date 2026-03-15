@@ -47,6 +47,12 @@ export {
   syncStatus,
   syncStatusEnum,
   syncTypeEnum,
+  orderChanges,
+  orderItemChanges,
+  orderChangeTypeEnum,
+  orderItemChangeTypeEnum,
+  orderChangesRelations,
+  orderItemChangesRelations,
 } from './tenant/schema.js';
 
 export type {
@@ -73,6 +79,12 @@ export type {
   NewSyncStatus,
   SyncStatusType,
   SyncType,
+  OrderChange,
+  NewOrderChange,
+  OrderItemChange,
+  NewOrderItemChange,
+  OrderChangeType,
+  OrderItemChangeType,
 } from './tenant/schema.js';
 
 export {

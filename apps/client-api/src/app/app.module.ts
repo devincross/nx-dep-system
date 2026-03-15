@@ -9,6 +9,7 @@ import { EncryptionModule } from '../encryption/encryption.module.js';
 import { OrdersModule } from '../orders/orders.module.js';
 import { NetsuiteModule } from '../netsuite/netsuite.module.js';
 import { SyncStatusModule } from '../sync-status/sync-status.module.js';
+import { ZohoModule } from '../zoho/zoho.module.js';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SyncStatusModule } from '../sync-status/sync-status.module.js';
     CredentialsModule,
     OrdersModule,
     NetsuiteModule,
+    ZohoModule,
     SyncStatusModule,
   ],
   controllers: [AppController],

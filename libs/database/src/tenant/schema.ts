@@ -203,6 +203,81 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   }),
 }));
 
+// Order change type enum
+export const orderChangeTypeEnum = ['created', 'updated', 'deleted'] as const;
+export type OrderChangeType = (typeof orderChangeTypeEnum)[number];
+
+// Order item change type enum
+export const orderItemChangeTypeEnum = ['added', 'updated', 'removed'] as const;
+export type OrderItemChangeType = (typeof orderItemChangeTypeEnum)[number];
+
+// Order changes table - tracks changes to orders for downstream sync
+export const orderChanges = mysqlTable(
+  'order_changes',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true })
+      .primaryKey()
+      .autoincrement(),
+    orderId: bigint('order_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => orders.id),
+    changeType: mysqlEnum('change_type', orderChangeTypeEnum).notNull(),
+    changedFields: text('changed_fields'), // JSON: {"field": {"old": x, "new": y}}
+    snapshot: text('snapshot'), // JSON: full order state at time of change
+    syncedAt: timestamp('synced_at'), // null until pushed to downstream system
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('order_changes_order_id_idx').on(table.orderId),
+    index('order_changes_synced_at_idx').on(table.syncedAt),
+  ]
+);
+
+// Order item changes table - tracks changes to order items for downstream sync
+export const orderItemChanges = mysqlTable(
+  'order_item_changes',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true })
+      .primaryKey()
+      .autoincrement(),
+    orderId: bigint('order_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => orders.id),
+    orderItemId: bigint('order_item_id', { mode: 'number', unsigned: true })
+      .references(() => orderItems.id), // nullable for removed items
+    serialNumber: varchar('serial_number', { length: 255 }).notNull(),
+    changeType: mysqlEnum('change_type', orderItemChangeTypeEnum).notNull(),
+    changedFields: text('changed_fields'), // JSON: {"field": {"old": x, "new": y}}
+    snapshot: text('snapshot'), // JSON: full item state at time of change
+    syncedAt: timestamp('synced_at'), // null until pushed to downstream system
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('order_item_changes_order_id_idx').on(table.orderId),
+    index('order_item_changes_order_item_id_idx').on(table.orderItemId),
+    index('order_item_changes_synced_at_idx').on(table.syncedAt),
+  ]
+);
+
+// Relations for change tables
+export const orderChangesRelations = relations(orderChanges, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderChanges.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const orderItemChangesRelations = relations(orderItemChanges, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderItemChanges.orderId],
+    references: [orders.id],
+  }),
+  orderItem: one(orderItems, {
+    fields: [orderItemChanges.orderItemId],
+    references: [orderItems.id],
+  }),
+}));
+
 // Types
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -220,4 +295,8 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
 export type SyncStatus = typeof syncStatus.$inferSelect;
 export type NewSyncStatus = typeof syncStatus.$inferInsert;
+export type OrderChange = typeof orderChanges.$inferSelect;
+export type NewOrderChange = typeof orderChanges.$inferInsert;
+export type OrderItemChange = typeof orderItemChanges.$inferSelect;
+export type NewOrderItemChange = typeof orderItemChanges.$inferInsert;
 

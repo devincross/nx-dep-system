@@ -65,6 +65,13 @@ const router = createRouter({
       component: () => import('../views/credentials/CredentialFormView.vue'),
       meta: { requiresAuth: true },
     },
+    // Zoho OAuth callback
+    {
+      path: '/zoho/callback',
+      name: 'zoho-callback',
+      component: () => import('../views/ZohoCallbackView.vue'),
+      meta: { requiresAuth: true },
+    },
     // NetSuite route
     {
       path: '/netsuite',

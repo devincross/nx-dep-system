@@ -34,61 +34,62 @@ export class ZohoAdapter implements DataSourcePort {
 
   async fetchAccounts(options?: FetchOptions): Promise<FetchResult<RawAccountData>> {
     this.ensureConfigured();
-    
+
     const params: Record<string, string> = {};
-    
+
     if (options?.lastModified) {
-      // Zoho uses Modified_Time for filtering
       params['criteria'] = `(Modified_Time:greater_than:${options.lastModified.toISOString()})`;
     }
-    
+
     if (options?.limit) {
       params['per_page'] = String(options.limit);
     }
-    
+
+    // Explicit page → single-page fetch; otherwise auto-paginate
     if (options?.page) {
       params['page'] = String(options.page);
+      const response = await this.makeRequest('GET', this.config!.accountsModule, params);
+      const data = response?.data ?? [];
+      const info = response?.info ?? {};
+      return {
+        data: data as RawAccountData[],
+        hasMore: info.more_records ?? false,
+        totalCount: info.count,
+      };
     }
 
-    const response = await this.makeRequest('GET', this.config!.accountsModule, params);
-    
-    const data = response?.data ?? [];
-    const info = response?.info ?? {};
-    
-    return {
-      data: data as RawAccountData[],
-      hasMore: info.more_records ?? false,
-      totalCount: info.count,
-    };
+    const { data, totalCount } = await this.fetchAllPages(this.config!.accountsModule, params);
+    return { data: data as RawAccountData[], hasMore: false, totalCount };
   }
 
   async fetchOrders(options?: FetchOptions): Promise<FetchResult<RawOrderData>> {
     this.ensureConfigured();
-    
+
     const params: Record<string, string> = {};
-    
+
     if (options?.lastModified) {
       params['criteria'] = `(Modified_Time:greater_than:${options.lastModified.toISOString()})`;
     }
-    
+
     if (options?.limit) {
       params['per_page'] = String(options.limit);
     }
-    
+
+    // Explicit page → single-page fetch; otherwise auto-paginate
     if (options?.page) {
       params['page'] = String(options.page);
+      const response = await this.makeRequest('GET', this.config!.ordersModule, params);
+      const data = response?.data ?? [];
+      const info = response?.info ?? {};
+      return {
+        data: data as RawOrderData[],
+        hasMore: info.more_records ?? false,
+        totalCount: info.count,
+      };
     }
 
-    const response = await this.makeRequest('GET', this.config!.ordersModule, params);
-    
-    const data = response?.data ?? [];
-    const info = response?.info ?? {};
-    
-    return {
-      data: data as RawOrderData[],
-      hasMore: info.more_records ?? false,
-      totalCount: info.count,
-    };
+    const { data, totalCount } = await this.fetchAllPages(this.config!.ordersModule, params);
+    return { data: data as RawOrderData[], hasMore: false, totalCount };
   }
 
   async testConnection(): Promise<boolean> {
@@ -100,6 +101,40 @@ export class ZohoAdapter implements DataSourcePort {
       this.logger.error(`Connection test failed: ${error}`);
       return false;
     }
+  }
+
+  /**
+   * Auto-paginate through all Zoho API pages for a module.
+   */
+  private async fetchAllPages(
+    module: string,
+    params: Record<string, string>,
+  ): Promise<{ data: unknown[]; totalCount: number }> {
+    const allData: unknown[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      params['page'] = String(page);
+      if (!params['per_page']) {
+        params['per_page'] = '200'; // Zoho max per page
+      }
+
+      const response = await this.makeRequest('GET', module, params);
+      const data = response?.data ?? [];
+      const info = response?.info ?? {};
+
+      allData.push(...(data as unknown[]));
+      hasMore = info.more_records ?? false;
+      page++;
+
+      if (page > 500) {
+        this.logger.warn(`Pagination safety limit reached for module ${module} at page ${page}`);
+        break;
+      }
+    }
+
+    return { data: allData, totalCount: allData.length };
   }
 
   private ensureConfigured(): void {

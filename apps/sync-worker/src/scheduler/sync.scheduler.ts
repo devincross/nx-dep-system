@@ -15,9 +15,11 @@ import { SyncOrdersUseCase } from '../application/sync-orders.use-case.js';
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
 import { NetsuiteAdapter, NetsuiteConfig } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
 import { ZohoAdapter, ZohoConfig } from '../infrastructure/adapters/zoho/zoho.adapter.js';
+import { DynamicZohoMapper, FieldMappingsConfig } from '../infrastructure/adapters/zoho/mappers/dynamic.mapper.js';
 import { AccountRepository } from '../infrastructure/repositories/account.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { SyncStatusRepository } from '../infrastructure/repositories/sync-status.repository.js';
+import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
 
 interface TenantMetadata {
   connectionType?: 'netsuite' | 'zoho';
@@ -36,6 +38,7 @@ export class SyncScheduler implements OnModuleInit {
     private readonly accountRepository: AccountRepository,
     private readonly orderRepository: OrderRepository,
     private readonly syncStatusRepository: SyncStatusRepository,
+    private readonly orderChangeRepository: OrderChangeRepository,
   ) {}
 
   onModuleInit() {
@@ -126,6 +129,10 @@ export class SyncScheduler implements OnModuleInit {
       this.accountRepository.setDb(tenantDb);
       this.orderRepository.setDb(tenantDb);
       this.syncStatusRepository.setDb(tenantDb);
+      this.orderChangeRepository.setDb(tenantDb);
+
+      // Wire up change tracking
+      this.orderRepository.setChangeRepository(this.orderChangeRepository);
 
       // Get last sync time for incremental sync
       const lastAccountSync = await this.syncStatusRepository.getLatest('accounts');
@@ -230,8 +237,18 @@ export class SyncScheduler implements OnModuleInit {
       };
       this.zohoAdapter.configure(config);
 
-      const mappingClass = connectionData['mapping_class'] as string || 'zoho-default';
-      const mapper = await this.mapperRegistry.getMapper(mappingClass);
+      // Use dynamic mapper when tenant provides field_mappings config,
+      // otherwise fall back to class-based mapper from registry
+      const fieldMappings = connectionData['field_mappings'] as FieldMappingsConfig | undefined;
+      let mapper;
+
+      if (fieldMappings) {
+        mapper = new DynamicZohoMapper(fieldMappings);
+        this.logger.log('Using dynamic Zoho mapper with custom field mappings');
+      } else {
+        const mappingClass = connectionData['mapping_class'] as string || 'zoho-default';
+        mapper = await this.mapperRegistry.getMapper(mappingClass);
+      }
 
       return { adapter: this.zohoAdapter, mapper };
     }
