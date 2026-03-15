@@ -170,6 +170,27 @@ export interface ConnectionStatus {
   expirationWarning?: string;
 }
 
+export interface DepStatus {
+  configured: boolean;
+  status: string;
+  credentialId?: number;
+  apiUrl?: string;
+  depResellerId?: string;
+  shipTo?: string;
+  soldTo?: string;
+  hasCertificate?: boolean;
+  hasPrivateKey?: boolean;
+  certificateExpiresAt?: string;
+  certificateSubject?: string;
+  certificateIssuer?: string;
+  daysUntilExpiry?: number;
+  expirationWarning?: string;
+  pendingCertUpload?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  message?: string;
+}
+
 export interface HealthStatus {
   status: string;
   timestamp: string;
