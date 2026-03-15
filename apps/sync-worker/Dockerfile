@@ -1,5 +1,5 @@
 # Build stage
-FROM docker.io/node:lts-alpine AS builder
+FROM docker.io/node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -33,7 +33,7 @@ RUN cd apps/sync-worker/dist && \
     require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2));"
 
 # Production stage
-FROM docker.io/node:lts-alpine
+FROM docker.io/node:24-alpine
 
 ENV HOST=0.0.0.0
 ENV PORT=3002
