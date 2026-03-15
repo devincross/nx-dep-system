@@ -49,22 +49,42 @@ function readMigrationStatements(folder: string): string[] {
 }
 
 /**
- * Check which tables already exist in the database.
+ * Get existing tables in the database.
  */
-async function getExistingTables(connection: mysql.Connection): Promise<Set<string>> {
-  const [rows] = await connection.query('SHOW TABLES') as [mysql.RowDataPacket[], any];
+async function getExistingTables(
+  connection: mysql.Connection,
+): Promise<Set<string>> {
+  const [rows] = (await connection.query('SHOW TABLES')) as [
+    mysql.RowDataPacket[],
+    any,
+  ];
   const tables = new Set<string>();
   for (const row of rows) {
-    // SHOW TABLES returns a single column whose name varies by database
-    const tableName = Object.values(row)[0] as string;
-    tables.add(tableName);
+    tables.add(Object.values(row)[0] as string);
   }
   return tables;
 }
 
 /**
- * Extract the table name from a CREATE TABLE statement.
- * Returns null if the statement isn't a CREATE TABLE.
+ * Get existing columns for a table.
+ */
+async function getExistingColumns(
+  connection: mysql.Connection,
+  tableName: string,
+): Promise<Set<string>> {
+  const [rows] = (await connection.query(`SHOW COLUMNS FROM \`${tableName}\``)) as [
+    mysql.RowDataPacket[],
+    any,
+  ];
+  const columns = new Set<string>();
+  for (const row of rows) {
+    columns.add(row['Field'] as string);
+  }
+  return columns;
+}
+
+/**
+ * Extract table name from a CREATE TABLE statement.
  */
 function extractCreateTableName(statement: string): string | null {
   const match = statement.match(/CREATE\s+TABLE\s+`?(\w+)`?/i);
@@ -72,10 +92,50 @@ function extractCreateTableName(statement: string): string | null {
 }
 
 /**
- * Run migration statements against a database connection.
+ * Parse column definitions from a CREATE TABLE statement.
+ * Returns an array of { name, definition } for each column.
+ */
+function parseColumnsFromCreateTable(
+  statement: string,
+): { name: string; definition: string }[] {
+  // Extract the body between ( and the last )
+  const bodyMatch = statement.match(/\((.+)\)/s);
+  if (!bodyMatch) return [];
+
+  const body = bodyMatch[1];
+  const columns: { name: string; definition: string }[] = [];
+
+  // Split by lines/commas, find column definitions (start with backtick)
+  const lines = body.split('\n').map((l) => l.trim().replace(/,$/, ''));
+
+  for (const line of lines) {
+    // Column definitions start with `column_name`
+    const colMatch = line.match(/^`(\w+)`\s+(.+)/);
+    if (colMatch) {
+      const name = colMatch[1];
+      const def = colMatch[2];
+      // Skip CONSTRAINT and PRIMARY KEY lines that happen to start with backtick
+      if (
+        !line.toUpperCase().startsWith('CONSTRAINT') &&
+        !line.toUpperCase().startsWith('PRIMARY')
+      ) {
+        columns.push({ name, definition: def });
+      }
+    }
+  }
+
+  return columns;
+}
+
+/**
+ * Run migration statements with column-level diffing.
  *
- * - Skips CREATE TABLE for tables that already exist
- * - For ALTER TABLE / CREATE INDEX, catches duplicate errors and continues
+ * For each CREATE TABLE:
+ * - If table doesn't exist: run the CREATE TABLE as-is
+ * - If table exists: compare columns, ADD any missing ones
+ *
+ * For ALTER TABLE / CREATE INDEX / other statements:
+ * - Run and skip on duplicate errors
  */
 async function runStatements(
   connection: mysql.Connection,
@@ -86,20 +146,45 @@ async function runStatements(
   let skipped = 0;
 
   for (const statement of statements) {
-    // Skip CREATE TABLE if table already exists
     const tableName = extractCreateTableName(statement);
+
     if (tableName && existingTables.has(tableName)) {
-      skipped++;
+      // Table exists — check for missing columns and add them
+      const existingColumns = await getExistingColumns(connection, tableName);
+      const desiredColumns = parseColumnsFromCreateTable(statement);
+
+      for (const col of desiredColumns) {
+        if (!existingColumns.has(col.name)) {
+          try {
+            await connection.query(
+              `ALTER TABLE \`${tableName}\` ADD COLUMN \`${col.name}\` ${col.definition}`,
+            );
+            console.log(
+              `[migrate] Added column ${tableName}.${col.name}`,
+            );
+            applied++;
+          } catch (err: any) {
+            const msg = String(err?.message || '').toLowerCase();
+            if (msg.includes('duplicate') || msg.includes('already exists')) {
+              skipped++;
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          skipped++;
+        }
+      }
       continue;
     }
 
+    // Not a CREATE TABLE for an existing table — run it
     try {
       await connection.query(statement);
       applied++;
     } catch (err: any) {
-      const msg = String(err?.message || err || '').toLowerCase();
+      const msg = String(err?.message || '').toLowerCase();
 
-      // Skip any "already exists" / "duplicate" errors
       if (
         msg.includes('already exists') ||
         msg.includes('duplicate') ||
@@ -110,7 +195,6 @@ async function runStatements(
         continue;
       }
 
-      // Rethrow anything else
       throw err;
     }
   }
@@ -128,7 +212,7 @@ export interface MigrateDbConfig {
 
 /**
  * Run landlord database migrations.
- * Safe to call on every startup — skips objects that already exist.
+ * Safe to call on every startup — adds missing tables and columns.
  */
 export async function migrateLandlordDb(
   config?: MigrateDbConfig,
@@ -167,7 +251,7 @@ export async function migrateLandlordDb(
 
 /**
  * Run tenant database migrations.
- * Safe to call on every sync cycle — skips objects that already exist.
+ * Safe to call any time — adds missing tables and columns.
  */
 export async function migrateTenantDb(config: MigrateDbConfig): Promise<void> {
   const folder = resolveMigrationsFolder('tenant');
