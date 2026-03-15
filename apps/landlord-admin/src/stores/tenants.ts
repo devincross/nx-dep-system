@@ -47,6 +47,25 @@ export const useTenantsStore = defineStore('tenants', () => {
     tenants.value = tenants.value.filter((t) => t.id !== id);
   }
 
+  async function migrateAllTenants(): Promise<{
+    total: number;
+    succeeded: number;
+    failed: number;
+    results: { tenant: string; success: boolean; message: string }[];
+  }> {
+    loading.value = true;
+    error.value = null;
+    try {
+      const response = await api.post('/tenants/migrate-all');
+      return response.data;
+    } catch (err: any) {
+      error.value = err.response?.data?.message || 'Failed to run migrations';
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   return {
     tenants,
     loading,
@@ -56,6 +75,7 @@ export const useTenantsStore = defineStore('tenants', () => {
     createTenant,
     updateTenant,
     deleteTenant,
+    migrateAllTenants,
   };
 });
 
