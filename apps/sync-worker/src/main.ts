@@ -6,14 +6,24 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module.js';
-import { initializeLandlordDb } from '@org/database';
+import { createLandlordConnection, migrateLandlordDb } from '@org/database';
 
 async function bootstrap() {
   const logger = new Logger('SyncWorker');
 
-  // Initialize landlord database connection
-  logger.log('Initializing landlord database connection...');
-  initializeLandlordDb({
+  // Run pending landlord migrations then connect
+  logger.log('Running landlord database migrations...');
+  await migrateLandlordDb({
+    host: process.env['DB_HOST'] || 'localhost',
+    port: parseInt(process.env['DB_PORT'] || '3306'),
+    user: process.env['DB_USER'] || 'root',
+    password: process.env['DB_PASSWORD'] || '',
+    database: process.env['DB_NAME'] || 'landlord',
+  });
+  logger.log('Landlord migrations complete');
+
+  // Initialize the landlord connection for the ORM
+  await createLandlordConnection({
     host: process.env['DB_HOST'] || 'localhost',
     port: parseInt(process.env['DB_PORT'] || '3306'),
     user: process.env['DB_USER'] || 'root',
@@ -38,7 +48,7 @@ async function bootstrap() {
   const port = process.env['PORT'] || 3002;
   await app.listen(port);
 
-  logger.log(`🔄 Sync Worker is running on: http://localhost:${port}/${globalPrefix}`);
+  logger.log(`Sync Worker is running on: http://localhost:${port}/${globalPrefix}`);
   logger.log('Scheduled sync will run every 10 minutes');
 }
 

@@ -5,7 +5,8 @@ import { TenantModule } from '../tenant/tenant.module.js';
 import { DomainModule } from '../domain/domain.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { ReportsModule } from '../reports/reports.module.js';
-import { createLandlordConnection } from '@org/database';
+import { Logger } from '@nestjs/common';
+import { createLandlordConnection, migrateLandlordDb } from '@org/database';
 
 @Module({
   imports: [TenantModule, DomainModule, AuthModule, ReportsModule],
@@ -13,8 +14,14 @@ import { createLandlordConnection } from '@org/database';
   providers: [AppService],
 })
 export class AppModule implements OnModuleInit {
+  private readonly logger = new Logger(AppModule.name);
+
   async onModuleInit() {
-    // Initialize the landlord database connection on app startup
+    // Run pending landlord migrations then connect
+    this.logger.log('Running landlord database migrations...');
+    await migrateLandlordDb();
+    this.logger.log('Migrations complete');
+
     await createLandlordConnection();
   }
 }

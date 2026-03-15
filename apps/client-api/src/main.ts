@@ -6,10 +6,16 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module.js';
-import { createLandlordConnection } from '@org/database';
+import { createLandlordConnection, migrateLandlordDb } from '@org/database';
 
 async function bootstrap() {
-  // Initialize landlord database connection first
+  const logger = new Logger('ClientAPI');
+
+  // Run pending landlord migrations then connect
+  logger.log('Running landlord database migrations...');
+  await migrateLandlordDb();
+  logger.log('Migrations complete');
+
   await createLandlordConnection();
 
   const app = await NestFactory.create(AppModule);

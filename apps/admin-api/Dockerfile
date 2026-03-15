@@ -44,6 +44,9 @@ WORKDIR /app
 # Copy built application and cleaned package.json
 COPY --from=builder /app/apps/admin-api/dist ./
 
+# Copy database migration files (for auto-migrate on startup)
+COPY --from=builder /app/libs/database/drizzle ./drizzle
+
 # Install production dependencies
 RUN npm install --omit=dev --ignore-scripts
 
