@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as forge from 'node-forge';
+import { generateKeyPairSync, createHash, X509Certificate, randomBytes } from 'crypto';
+import { execSync } from 'child_process';
+import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 export interface GeneratedCertificate {
   /** RSA private key in PEM format */
@@ -34,6 +38,7 @@ export class CertificateGeneratorService {
   /**
    * Generate an RSA key pair and self-signed X.509 certificate
    * suitable for NetSuite OAuth 2.0 M2M authentication.
+   * Uses Node.js native crypto + openssl for certificate creation.
    */
   generate(options?: GenerateCertificateOptions): GeneratedCertificate {
     const keySize = options?.keySize ?? 2048;
@@ -43,71 +48,51 @@ export class CertificateGeneratorService {
 
     this.logger.log(`Generating ${keySize}-bit RSA key pair and certificate (valid ${validityDays} days)`);
 
-    // Generate RSA key pair
-    const keys = forge.pki.rsa.generateKeyPair({ bits: keySize, e: 0x10001 });
+    // Generate RSA key pair using Node.js native crypto
+    const { privateKey: privateKeyPem, publicKey: publicKeyPem } = generateKeyPairSync('rsa', {
+      modulusLength: keySize,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
 
-    // Create the certificate
-    const cert = forge.pki.createCertificate();
-    cert.publicKey = keys.publicKey;
-    cert.serialNumber = this.generateSerialNumber();
+    // Use openssl to create a self-signed certificate
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cert-'));
+    const keyPath = join(tmpDir, 'key.pem');
+    const certPath = join(tmpDir, 'cert.pem');
 
-    const now = new Date();
-    const expiry = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
-    cert.validity.notBefore = now;
-    cert.validity.notAfter = expiry;
+    try {
+      writeFileSync(keyPath, privateKeyPem);
 
-    const attrs = [
-      { name: 'commonName', value: commonName },
-      { name: 'organizationName', value: organization },
-    ];
-    cert.setSubject(attrs);
-    cert.setIssuer(attrs); // self-signed
+      const subject = `/CN=${commonName}/O=${organization}`;
+      execSync(
+        `openssl req -new -x509 -key "${keyPath}" -out "${certPath}" -days ${validityDays} -sha256 -subj "${subject}" -addext "basicConstraints=CA:FALSE" -addext "keyUsage=digitalSignature,keyEncipherment" -addext "extendedKeyUsage=clientAuth"`,
+        { stdio: 'pipe' }
+      );
 
-    // Extensions
-    cert.setExtensions([
-      { name: 'basicConstraints', cA: false },
-      {
-        name: 'keyUsage',
-        digitalSignature: true,
-        keyEncipherment: true,
-      },
-      {
-        name: 'extKeyUsage',
-        clientAuth: true,
-      },
-    ]);
+      const certificatePem = readFileSync(certPath, 'utf-8');
 
-    // Self-sign with the private key (SHA-256)
-    cert.sign(keys.privateKey, forge.md.sha256.create());
+      // Parse the certificate to extract metadata
+      const x509 = new X509Certificate(certificatePem);
+      const fingerprint = x509.fingerprint256.replace(/:/g, ':');
+      const serialNumber = x509.serialNumber;
+      const validFrom = new Date(x509.validFrom).toISOString();
+      const validTo = new Date(x509.validTo).toISOString();
 
-    const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
-    const certificatePem = forge.pki.certificateToPem(cert);
+      this.logger.log(`Certificate generated. Fingerprint: ${fingerprint}, Expires: ${validTo}`);
 
-    // Calculate fingerprint
-    const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
-    const md = forge.md.sha256.create();
-    md.update(derBytes);
-    const fingerprint = md.digest()
-      .toHex()
-      .match(/.{2}/g)!
-      .join(':')
-      .toUpperCase();
-
-    this.logger.log(`Certificate generated. Fingerprint: ${fingerprint}, Expires: ${expiry.toISOString()}`);
-
-    return {
-      privateKey: privateKeyPem,
-      certificatePem,
-      fingerprint,
-      serialNumber: cert.serialNumber,
-      validFrom: now.toISOString(),
-      validTo: expiry.toISOString(),
-    };
-  }
-
-  private generateSerialNumber(): string {
-    // Generate a random 16-byte serial number as hex
-    const bytes = forge.random.getBytesSync(16);
-    return forge.util.bytesToHex(bytes);
+      return {
+        privateKey: privateKeyPem,
+        certificatePem,
+        fingerprint,
+        serialNumber,
+        validFrom,
+        validTo,
+      };
+    } finally {
+      // Clean up temp files
+      try { unlinkSync(keyPath); } catch { /* ignore */ }
+      try { unlinkSync(certPath); } catch { /* ignore */ }
+      try { execSync(`rmdir "${tmpDir}"`, { stdio: 'pipe' }); } catch { /* ignore */ }
+    }
   }
 }
