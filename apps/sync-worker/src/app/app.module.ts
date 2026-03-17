@@ -14,7 +14,7 @@ import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.
 // Infrastructure layer
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
 import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
-import { NetsuiteBaseMapper, ByuNetsuiteMapper } from '../infrastructure/adapters/netsuite/mappers/index.js';
+import { NetsuiteBaseMapper, ByuMapper } from '../infrastructure/adapters/netsuite/mappers/index.js';
 import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
 import { ZohoBaseMapper } from '../infrastructure/adapters/zoho/mappers/index.js';
 import { DownstreamSyncAdapter } from '../infrastructure/adapters/downstream/downstream-sync.adapter.js';
@@ -52,7 +52,7 @@ import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
     DepSyncAdapter,
     // Mappers
     NetsuiteBaseMapper,
-    ByuNetsuiteMapper,
+    ByuMapper,
     ZohoBaseMapper,
     // Repositories
     AccountRepository,
@@ -77,7 +77,7 @@ export class AppModule implements OnModuleInit {
 
     // NetSuite mappers
     this.mapperRegistry.register('netsuite-default', NetsuiteBaseMapper);
-    this.mapperRegistry.register('byu', ByuNetsuiteMapper);
+    this.mapperRegistry.register('byu', ByuMapper);
 
     // Zoho mappers
     this.mapperRegistry.register('zoho-default', ZohoBaseMapper);

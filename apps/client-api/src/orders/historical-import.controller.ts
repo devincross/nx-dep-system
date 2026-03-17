@@ -6,6 +6,7 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
+import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
@@ -13,10 +14,21 @@ import { HistoricalImportService } from './historical-import.service.js';
 
 class HistoricalImportDto {
   /** ISO date string — pull orders modified since this date */
+  @IsString()
+  @IsNotEmpty()
   startDate!: string;
+
   /** Records per page (default 50, max 200) */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(200)
   pageSize?: number;
+
   /** Delay between pages in ms (default 2000) */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
   pageDelayMs?: number;
 }
 

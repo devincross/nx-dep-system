@@ -1,3 +1,3 @@
 export * from './base.mapper.js';
-export * from './byu.mapper.js';
+export { ByuMapper } from './byu.mapper.js';
 
