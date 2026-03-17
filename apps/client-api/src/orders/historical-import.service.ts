@@ -282,13 +282,13 @@ export class HistoricalImportService {
     limit: number,
     page: number,
   ) => Promise<{ data: Record<string, unknown>[]; hasMore: boolean }> {
-    return async (startDate, limit, page) => {
-      const response = await this.netsuiteService.callOrderScript<
+    const scriptId = connData['netsuite_order_script_id'] as string;
+
+    return async (startDate, _limit, _page) => {
+      const response = await this.netsuiteService.makeRequest<
         Record<string, unknown>[] | Record<string, unknown>
-      >(tenant.db, 'GET', {
+      >(tenant.db, 'GET', scriptId, {
         last_modified: startDate.toISOString(),
-        limit: String(limit),
-        page: String(page),
       });
 
       if (!response.success || !response.data) {
