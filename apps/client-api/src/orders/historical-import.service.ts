@@ -1,9 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { CredentialsService } from '../credentials/credentials.service.js';
-
-// Inline lightweight implementations — we don't import from sync-worker,
-// we re-use the same adapter/mapper/repo patterns from @org/database.
+import { NetsuiteService } from '../netsuite/netsuite.service.js';
 import { eq, isNull, and, desc } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -25,11 +23,56 @@ interface ImportResult {
   pages: number;
 }
 
+interface MappedOrderItem {
+  serialNumber: string;
+  isDep: boolean;
+  depStatus: 'pending';
+}
+
+interface MappedOrder {
+  externalOrderId: string;
+  externalAccountId: string;
+  externalOrderStatus?: string;
+  isDep: boolean;
+  po?: string;
+  source: string;
+  depOrderId?: string;
+  depOrderedAt?: Date;
+  depShippedAt?: Date;
+  items: MappedOrderItem[];
+}
+
+interface ZohoFieldMappingsConfig {
+  account?: {
+    externalAccountId?: string;
+    name?: string;
+    depAccountId?: string;
+  };
+  order?: {
+    externalOrderId?: string;
+    externalAccountId?: string;
+    externalOrderStatus?: string;
+    isDep?: string;
+    po?: string;
+    depOrderId?: string;
+    depOrderedAt?: string;
+    depShippedAt?: string;
+  };
+  orderItems?: {
+    sourceField?: string;
+    serialNumbers?: string;
+    isDep?: string;
+  };
+}
+
 @Injectable()
 export class HistoricalImportService {
   private readonly logger = new Logger(HistoricalImportService.name);
 
-  constructor(private readonly credentialsService: CredentialsService) {}
+  constructor(
+    private readonly credentialsService: CredentialsService,
+    private readonly netsuiteService: NetsuiteService,
+  ) {}
 
   async runImport(
     tenant: TenantContext,
@@ -58,7 +101,7 @@ export class HistoricalImportService {
     const connData = credential.connectionData as Record<string, unknown>;
 
     // Build the appropriate fetcher
-    const fetcher = this.buildFetcher(connectionType, connData);
+    const fetcher = this.buildFetcher(connectionType, connData, tenant);
     const mapOrder = this.buildMapper(connectionType, connData);
 
     const result: ImportResult = {
@@ -149,6 +192,7 @@ export class HistoricalImportService {
   private buildFetcher(
     type: 'netsuite' | 'zoho',
     connData: Record<string, unknown>,
+    tenant: TenantContext,
   ): (
     startDate: Date,
     limit: number,
@@ -157,7 +201,7 @@ export class HistoricalImportService {
     if (type === 'zoho') {
       return this.buildZohoFetcher(connData);
     }
-    return this.buildNetsuiteFetcher(connData);
+    return this.buildNetsuiteFetcher(connData, tenant);
   }
 
   private buildZohoFetcher(
@@ -232,82 +276,123 @@ export class HistoricalImportService {
 
   private buildNetsuiteFetcher(
     connData: Record<string, unknown>,
+    tenant: TenantContext,
   ): (
     startDate: Date,
     limit: number,
     page: number,
   ) => Promise<{ data: Record<string, unknown>[]; hasMore: boolean }> {
-    // NetSuite uses RESTlets — we call the order script with last_modified param
-    // This is a simplified fetcher; in practice the adapter handles OAuth
-    const restletHost = connData['netsuite_restlet_host'] as string;
-    const scriptId = connData['netsuite_order_script_id'] as string;
-    const deployId = connData['netsuite_deploy_id'] as number;
-
     return async (startDate, limit, page) => {
-      // For historical import via NetSuite, we use the same RESTlet
-      // but pass last_modified and pagination params
-      // The actual OAuth signing is handled by the NetSuite adapter in sync-worker
-      // For client-api, we return a stub that tells the user to use the sync-worker endpoint
-      this.logger.warn(
-        'NetSuite historical import should be triggered via sync-worker for proper OAuth handling',
-      );
-      return { data: [], hasMore: false };
+      const response = await this.netsuiteService.callOrderScript<
+        Record<string, unknown>[] | Record<string, unknown>
+      >(tenant.db, 'GET', {
+        last_modified: startDate.toISOString(),
+        limit: String(limit),
+        page: String(page),
+      });
+
+      if (!response.success || !response.data) {
+        this.logger.error(`NetSuite fetch failed: ${response.error ?? 'no data'}`);
+        return { data: [], hasMore: false };
+      }
+
+      const data = Array.isArray(response.data) ? response.data : [response.data];
+      this.logger.log(`NetSuite returned ${data.length} records (page ${page})`);
+
+      return {
+        data,
+        hasMore: data.length >= limit,
+      };
     };
   }
 
-  // ---- Simple mapper ----
+  // ---- Mapper resolution ----
+
+  private normalizeMappingClass(mappingClass: string): string {
+    if (mappingClass.includes('\\')) {
+      const parts = mappingClass.split('\\');
+      const className = parts[parts.length - 1];
+      return className.replace(/Mapping$/i, '').toLowerCase();
+    }
+    return mappingClass.toLowerCase();
+  }
 
   private buildMapper(
     type: 'netsuite' | 'zoho',
     connData: Record<string, unknown>,
-  ): (raw: Record<string, unknown>) => {
-    externalOrderId: string;
-    externalAccountId: string;
-    externalOrderStatus?: string;
-    isDep: boolean;
-    po?: string;
-    source: string;
-    depOrderId?: string;
-    depOrderedAt?: Date;
-    depShippedAt?: Date;
-    items: {
-      serialNumber: string;
-      isDep: boolean;
-      depStatus: 'pending';
-    }[];
-  } {
+  ): (raw: Record<string, unknown>) => MappedOrder {
+    const mappingClass = connData['mapping_class']
+      ? this.normalizeMappingClass(String(connData['mapping_class']))
+      : undefined;
+
+    this.logger.log(`Building mapper: type=${type}, mapping_class=${mappingClass ?? 'default'}`);
+
     if (type === 'zoho') {
-      return (raw) => {
-        const items: { serialNumber: string; isDep: boolean; depStatus: 'pending' }[] = [];
-        const rawItems = (raw['Product_Details'] ?? raw['Ordered_Items'] ?? []) as Record<string, unknown>[];
-        if (Array.isArray(rawItems)) {
-          for (const item of rawItems) {
-            const serials = String(item['Serial_Numbers'] ?? item['Serials'] ?? '');
-            for (const sn of serials.split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean)) {
-              const isDep = Boolean(item['Is_DEP'] ?? item['DEP_Eligible'] ?? false);
-              items.push({ serialNumber: sn, isDep, depStatus: 'pending' });
-            }
-          }
-        }
-        return {
-          externalOrderId: String(raw['id'] ?? raw['Id'] ?? ''),
-          externalAccountId: String((raw['Account_Name'] as any)?.id ?? raw['Account_Name'] ?? ''),
-          externalOrderStatus: raw['Status'] ? String(raw['Status']) : undefined,
-          isDep: Boolean(raw['Is_DEP'] ?? raw['DEP_Eligible'] ?? false),
-          po: raw['PO_Number'] ? String(raw['PO_Number']) : undefined,
-          source: 'zoho',
-          depOrderId: raw['DEP_Order_ID'] ? String(raw['DEP_Order_ID']) : undefined,
-          depOrderedAt: raw['DEP_Ordered_At'] ? new Date(String(raw['DEP_Ordered_At'])) : undefined,
-          depShippedAt: raw['DEP_Shipped_At'] ? new Date(String(raw['DEP_Shipped_At'])) : undefined,
-          items,
-        };
-      };
+      const fieldMappings = connData['field_mappings'] as ZohoFieldMappingsConfig | undefined;
+      return this.buildZohoMapper(fieldMappings);
     }
 
-    // NetSuite mapper
-    return (raw) => ({
+    if (mappingClass === 'byu') {
+      return this.byuMapper;
+    }
+
+    return this.netsuiteDefaultMapper;
+  }
+
+  private byuMapper(raw: Record<string, unknown>): MappedOrder {
+    const products = (raw['products'] ?? []) as Array<Record<string, unknown>>;
+    const items: MappedOrderItem[] = [];
+
+    for (const product of products) {
+      const serial = product['serial'] ? String(product['serial']).trim() : '';
+      if (!serial) continue;
+      items.push({
+        serialNumber: serial,
+        isDep: Boolean(product['is_dep']),
+        depStatus: 'pending',
+      });
+    }
+
+    return {
+      externalOrderId: String(raw['order_id'] ?? ''),
+      externalAccountId: String(raw['account_id'] ?? ''),
+      externalOrderStatus: raw['transaction_type']
+        ? String(raw['transaction_type'])
+        : undefined,
+      isDep: products.some((p) => Boolean(p['is_dep'])),
+      po: raw['po'] ? String(raw['po']) : undefined,
+      source: 'byu',
+      depOrderId: String(raw['order_id'] ?? ''),
+      depOrderedAt: raw['date_created']
+        ? new Date(String(raw['date_created']))
+        : undefined,
+      items,
+    };
+  }
+
+  private netsuiteDefaultMapper(raw: Record<string, unknown>): MappedOrder {
+    const items: MappedOrderItem[] = [];
+    const rawItems = (raw['item'] ?? raw['items'] ?? raw['line'] ?? raw['lines'] ?? []) as unknown[];
+    if (Array.isArray(rawItems)) {
+      for (const rawItem of rawItems) {
+        const item = rawItem as Record<string, unknown>;
+        const serialField = item['serialnumber'] ?? item['serial_number'] ??
+          item['serialnumbers'] ?? item['serial_numbers'] ??
+          item['custcol_serial_numbers'] ?? '';
+        if (!serialField) continue;
+        for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean)) {
+          items.push({
+            serialNumber: sn,
+            isDep: Boolean(item['custcol_is_dep'] ?? item['is_dep'] ?? false),
+            depStatus: 'pending',
+          });
+        }
+      }
+    }
+
+    return {
       externalOrderId: String(raw['id'] ?? raw['internalid'] ?? raw['tranid'] ?? ''),
-      externalAccountId: String((raw['entity'] as any)?.id ?? raw['entity'] ?? ''),
+      externalAccountId: String((raw['entity'] as any)?.id ?? raw['entity'] ?? raw['customer'] ?? ''),
       externalOrderStatus: raw['status'] ? String(raw['status']) : undefined,
       isDep: Boolean(raw['custbody_is_dep'] ?? raw['is_dep'] ?? false),
       po: raw['otherrefnum'] ? String(raw['otherrefnum']) : undefined,
@@ -315,8 +400,88 @@ export class HistoricalImportService {
       depOrderId: raw['custbody_dep_order_id'] ? String(raw['custbody_dep_order_id']) : undefined,
       depOrderedAt: raw['custbody_dep_ordered_at'] ? new Date(String(raw['custbody_dep_ordered_at'])) : undefined,
       depShippedAt: raw['custbody_dep_shipped_at'] ? new Date(String(raw['custbody_dep_shipped_at'])) : undefined,
-      items: [],
-    });
+      items,
+    };
+  }
+
+  private resolveFieldPath(obj: Record<string, unknown>, path: string): unknown {
+    const parts = path.split('.');
+    let current: unknown = obj;
+    for (const part of parts) {
+      if (current == null || typeof current !== 'object') return undefined;
+      current = (current as Record<string, unknown>)[part];
+    }
+    return current;
+  }
+
+  private buildZohoMapper(fieldMappings?: ZohoFieldMappingsConfig): (raw: Record<string, unknown>) => MappedOrder {
+    const orderCfg = {
+      externalOrderId: 'id',
+      externalAccountId: 'Account_Name.id',
+      externalOrderStatus: 'Status',
+      isDep: 'Is_DEP',
+      po: 'PO_Number',
+      depOrderId: 'DEP_Order_ID',
+      depOrderedAt: 'DEP_Ordered_At',
+      depShippedAt: 'DEP_Shipped_At',
+      ...fieldMappings?.order,
+    };
+    const itemsCfg = {
+      sourceField: 'Product_Details',
+      serialNumbers: 'Serial_Numbers',
+      isDep: 'Is_DEP',
+      ...fieldMappings?.orderItems,
+    };
+
+    return (raw: Record<string, unknown>): MappedOrder => {
+      const items: MappedOrderItem[] = [];
+      const rawItems = this.resolveFieldPath(raw, itemsCfg.sourceField);
+      if (Array.isArray(rawItems)) {
+        for (const rawItem of rawItems) {
+          const item = rawItem as Record<string, unknown>;
+          const serialField = this.resolveFieldPath(item, itemsCfg.serialNumbers);
+          if (!serialField) continue;
+          for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean)) {
+            const depVal = this.resolveFieldPath(item, itemsCfg.isDep);
+            items.push({
+              serialNumber: sn,
+              isDep: this.parseTruthy(depVal),
+              depStatus: 'pending',
+            });
+          }
+        }
+      }
+
+      const depOrderedAtVal = this.resolveFieldPath(raw, orderCfg.depOrderedAt);
+      const depShippedAtVal = this.resolveFieldPath(raw, orderCfg.depShippedAt);
+
+      return {
+        externalOrderId: String(this.resolveFieldPath(raw, orderCfg.externalOrderId) ?? ''),
+        externalAccountId: String(this.resolveFieldPath(raw, orderCfg.externalAccountId) ?? ''),
+        externalOrderStatus: this.resolveFieldPath(raw, orderCfg.externalOrderStatus)
+          ? String(this.resolveFieldPath(raw, orderCfg.externalOrderStatus))
+          : undefined,
+        isDep: this.parseTruthy(this.resolveFieldPath(raw, orderCfg.isDep)),
+        po: this.resolveFieldPath(raw, orderCfg.po)
+          ? String(this.resolveFieldPath(raw, orderCfg.po))
+          : undefined,
+        source: 'zoho',
+        depOrderId: this.resolveFieldPath(raw, orderCfg.depOrderId)
+          ? String(this.resolveFieldPath(raw, orderCfg.depOrderId))
+          : undefined,
+        depOrderedAt: depOrderedAtVal ? new Date(String(depOrderedAtVal)) : undefined,
+        depShippedAt: depShippedAtVal ? new Date(String(depShippedAtVal)) : undefined,
+        items,
+      };
+    };
+  }
+
+  private parseTruthy(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      return ['true', '1', 'yes'].includes(value.toLowerCase());
+    }
+    return Boolean(value);
   }
 
   // ---- DB helpers (no change tracking) ----
@@ -344,7 +509,7 @@ export class HistoricalImportService {
 
   private async upsertOrderNoChanges(
     db: TenantDb,
-    order: ReturnType<ReturnType<typeof this.buildMapper>>,
+    order: MappedOrder,
     accountId: number,
   ): Promise<boolean> {
     const existing = await db

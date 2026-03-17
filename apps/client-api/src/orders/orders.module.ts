@@ -6,9 +6,10 @@ import { HistoricalImportService } from './historical-import.service.js';
 import { DepActionsController } from './dep-actions.controller.js';
 import { DepActionsService } from './dep-actions.service.js';
 import { CredentialsModule } from '../credentials/credentials.module.js';
+import { NetsuiteModule } from '../netsuite/netsuite.module.js';
 
 @Module({
-  imports: [CredentialsModule],
+  imports: [CredentialsModule, NetsuiteModule],
   controllers: [OrdersController, HistoricalImportController, DepActionsController],
   providers: [OrdersService, HistoricalImportService, DepActionsService],
   exports: [OrdersService],
