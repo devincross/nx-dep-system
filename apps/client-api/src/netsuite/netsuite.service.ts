@@ -120,6 +120,7 @@ export class NetsuiteService {
 
     // Determine auth type (default to oauth1 for backward compatibility)
     const authType = connectionData.auth_type || 'oauth1';
+    this.logger.log(`[makeRequest] ${method} authType=${authType} url=${restletUrl}`);
 
     try {
       if (authType === 'oauth2') {
@@ -146,6 +147,11 @@ export class NetsuiteService {
     restletUrl: string,
     data?: Record<string, unknown>
   ): Promise<NetsuiteResponse<T>> {
+    this.logger.log(`[OAuth1] ${method} ${restletUrl}`);
+    this.logger.debug(`[OAuth1] realm=${connectionData.netsuite_realm}, account=${connectionData.netsuite_account}`);
+    this.logger.debug(`[OAuth1] consumer_key=${connectionData.netsuite_consumer_key?.slice(0, 8)}...`);
+    this.logger.debug(`[OAuth1] token=${connectionData.netsuite_token?.slice(0, 8)}...`);
+
     const client = this.createClient(connectionData);
 
     const requestOptions: { method: string; restletUrl: string; body?: string } = {
@@ -156,14 +162,30 @@ export class NetsuiteService {
     // Only add body for non-GET requests
     if (method !== 'GET' && data) {
       requestOptions.body = JSON.stringify(data);
+      this.logger.debug(`[OAuth1] body=${requestOptions.body}`);
     }
 
-    const response = await client.request(requestOptions);
+    try {
+      const response = await client.request(requestOptions);
+      this.logger.log(`[OAuth1] response status=${response.status ?? 'ok'}, data type=${typeof response.data}, isArray=${Array.isArray(response.data)}`);
+      if (Array.isArray(response.data)) {
+        this.logger.log(`[OAuth1] response count=${response.data.length}`);
+      }
+      this.logger.debug(`[OAuth1] response body=${JSON.stringify(response.data)?.slice(0, 500)}`);
 
-    return {
-      success: true,
-      data: response.data as T,
-    };
+      return {
+        success: true,
+        data: response.data as T,
+      };
+    } catch (error: unknown) {
+      const err = error as Record<string, unknown>;
+      this.logger.error(`[OAuth1] request failed: ${err?.['message'] ?? error}`);
+      this.logger.error(`[OAuth1] status=${err?.['status'] ?? err?.['statusCode'] ?? 'N/A'}`);
+      if (err?.['response']) {
+        this.logger.error(`[OAuth1] response body=${JSON.stringify(err['response'])?.slice(0, 500)}`);
+      }
+      throw error;
+    }
   }
 
   /**
