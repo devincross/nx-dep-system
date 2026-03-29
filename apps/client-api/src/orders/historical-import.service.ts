@@ -288,7 +288,7 @@ export class HistoricalImportService {
       const response = await this.netsuiteService.makeRequest<
         Record<string, unknown>[] | Record<string, unknown>
       >(tenant.db, 'GET', scriptId, {
-        last_modified: startDate.toISOString(),
+        last_modified: startDate.toISOString().split('T')[0],
       });
 
       if (!response.success || !response.data) {
