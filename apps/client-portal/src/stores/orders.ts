@@ -23,7 +23,7 @@ export const useOrdersStore = defineStore('orders', () => {
       orders.value = response.data;
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch orders';
+      error.value = err.response?.data?.message || 'Unable to load your orders. Please check your internet connection and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -37,7 +37,7 @@ export const useOrdersStore = defineStore('orders', () => {
       const response = await api.get<Order[]>(`/orders/account/${accountId}`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch orders';
+      error.value = err.response?.data?.message || 'Unable to load orders for this account. Please try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -51,7 +51,7 @@ export const useOrdersStore = defineStore('orders', () => {
       const response = await api.get<Order>(`/orders/${id}`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch order';
+      error.value = err.response?.data?.message || 'Unable to load this order. Please try again or contact support if the problem continues.';
       throw err;
     } finally {
       loading.value = false;
@@ -66,7 +66,7 @@ export const useOrdersStore = defineStore('orders', () => {
       orders.value.push(response.data);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to create order';
+      error.value = err.response?.data?.message || 'Unable to create the order. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -84,7 +84,7 @@ export const useOrdersStore = defineStore('orders', () => {
       }
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to update order';
+      error.value = err.response?.data?.message || 'Unable to update the order. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -98,7 +98,7 @@ export const useOrdersStore = defineStore('orders', () => {
       await api.delete(`/orders/${id}`);
       orders.value = orders.value.filter((o) => o.id !== id);
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to delete order';
+      error.value = err.response?.data?.message || 'Unable to delete this order. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;
@@ -113,7 +113,7 @@ export const useOrdersStore = defineStore('orders', () => {
       const response = await api.post<OrderItem>(`/orders/${orderId}/items`, data);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to add order item';
+      error.value = err.response?.data?.message || 'Unable to add the item to this order. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -131,7 +131,7 @@ export const useOrdersStore = defineStore('orders', () => {
       const response = await api.put<OrderItem>(`/orders/${orderId}/items/${itemId}`, data);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to update order item';
+      error.value = err.response?.data?.message || 'Unable to update this item. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -144,7 +144,7 @@ export const useOrdersStore = defineStore('orders', () => {
     try {
       await api.delete(`/orders/${orderId}/items/${itemId}`);
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to delete order item';
+      error.value = err.response?.data?.message || 'Unable to remove this item. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;
@@ -158,7 +158,7 @@ export const useOrdersStore = defineStore('orders', () => {
       const response = await api.post<OrderItem>(`/orders/${orderId}/items/${itemId}/restore`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to restore order item';
+      error.value = err.response?.data?.message || 'Unable to restore this item. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;

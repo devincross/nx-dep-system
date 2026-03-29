@@ -19,7 +19,7 @@ async function handleLogin() {
     await authStore.login({ email: email.value, password: password.value });
     router.push('/');
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Login failed';
+    error.value = err.response?.data?.message || 'Unable to sign in. Please check your email and password, then try again.';
   } finally {
     loading.value = false;
   }

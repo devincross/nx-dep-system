@@ -151,15 +151,19 @@ onMounted(() => {
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card>
-        <v-card-title>{{ isPermanentDelete ? 'Permanently Delete' : 'Delete' }} Credential</v-card-title>
+        <v-card-title>{{ isPermanentDelete ? 'Permanently Delete Connection' : 'Remove Connection' }}</v-card-title>
         <v-card-text>
-          Are you sure you want to {{ isPermanentDelete ? 'permanently delete' : 'delete' }} this credential?
-          {{ isPermanentDelete ? 'This action cannot be undone.' : '' }}
+          <template v-if="isPermanentDelete">
+            Are you sure you want to permanently delete this connection? This action cannot be undone and all associated data will be lost.
+          </template>
+          <template v-else>
+            Are you sure you want to remove this connection? It will be disabled but can be restored later if needed.
+          </template>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn variant="text" @click="deleteDialog = false">Cancel</v-btn>
-          <v-btn color="error" @click="handleDelete">Delete</v-btn>
+          <v-btn color="error" @click="handleDelete">{{ isPermanentDelete ? 'Delete Permanently' : 'Remove' }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

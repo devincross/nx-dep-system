@@ -14,7 +14,7 @@ onMounted(async () => {
 
   if (!code) {
     status.value = 'error';
-    errorMessage.value = 'No authorization code received from Zoho.';
+    errorMessage.value = 'Zoho did not return an authorization code. Please try connecting again from the credentials page.';
     return;
   }
 
@@ -22,7 +22,7 @@ onMounted(async () => {
   const saved = sessionStorage.getItem('zoho_oauth_params');
   if (!saved) {
     status.value = 'error';
-    errorMessage.value = 'OAuth session expired. Please try connecting again from the credentials page.';
+    errorMessage.value = 'Your connection session has expired. Please go back to the credentials page and try connecting again.';
     return;
   }
 
@@ -62,7 +62,7 @@ onMounted(async () => {
     }
   } catch (err: any) {
     status.value = 'error';
-    errorMessage.value = err.response?.data?.message || err.message || 'Failed to exchange token with Zoho.';
+    errorMessage.value = err.response?.data?.message || err.message || 'Unable to complete the Zoho connection. Please try again from the credentials page.';
     sessionStorage.removeItem('zoho_oauth_params');
   }
 });
@@ -74,7 +74,7 @@ onMounted(async () => {
       <template v-if="status === 'loading'">
         <v-progress-circular indeterminate color="primary" size="48" class="mb-4"></v-progress-circular>
         <div class="text-h6">Connecting to Zoho...</div>
-        <div class="text-body-2 text-grey mt-2">Exchanging authorization code for tokens</div>
+        <div class="text-body-2 text-grey mt-2">Finishing the connection setup...</div>
       </template>
 
       <template v-if="status === 'success'">

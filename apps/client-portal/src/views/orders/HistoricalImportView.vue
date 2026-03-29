@@ -35,7 +35,7 @@ async function startImport() {
     });
     result.value = response.data;
   } catch (err: any) {
-    error.value = err.response?.data?.message || err.message || 'Import failed';
+    error.value = err.response?.data?.message || err.message || 'The import could not be completed. Please check your connection settings and try again.';
   } finally {
     importing.value = false;
   }
@@ -47,9 +47,9 @@ async function startImport() {
     <h1 class="text-h4 mb-6">Historical Order Import</h1>
 
     <v-alert type="info" variant="tonal" class="mb-6">
-      Pull orders from your ERP (NetSuite/Zoho) starting from a specific date.
-      Imported orders are marked as already processed and will <strong>not</strong> be pushed to Apple DEP.
-      Use this to backfill existing orders when onboarding a new tenant.
+      Import existing orders from your system (NetSuite or Zoho) starting from a specific date.
+      Imported orders are recorded for tracking purposes only and will <strong>not</strong> be submitted to Apple Device Enrollment.
+      Use this to bring in your order history when setting up your account for the first time.
     </v-alert>
 
     <v-card>
@@ -73,7 +73,7 @@ async function startImport() {
               v-model.number="pageSize"
               label="Page size"
               type="number"
-              hint="Records per API call (max 200). Lower = fewer API calls at once"
+              hint="Number of orders to fetch at a time (max 200). Use a lower number if you experience timeouts."
               persistent-hint
               :min="1"
               :max="200"
@@ -82,9 +82,9 @@ async function startImport() {
           <v-col cols="12" md="4">
             <v-text-field
               v-model.number="pageDelayMs"
-              label="Delay between pages (ms)"
+              label="Delay between batches (ms)"
               type="number"
-              hint="Wait time between API calls to avoid rate limits"
+              hint="Wait time between each batch to avoid overloading your system"
               persistent-hint
               :min="0"
               :max="30000"
@@ -114,7 +114,7 @@ async function startImport() {
         <div class="text-h6">Importing orders...</div>
         <div class="text-body-2 text-grey mt-2">
           This may take several minutes depending on the number of orders.
-          Pages are fetched with a {{ pageDelayMs }}ms delay to avoid rate limits.
+          Batches are fetched with a {{ pageDelayMs }}ms delay between each request.
         </div>
       </v-card-text>
     </v-card>
@@ -128,7 +128,7 @@ async function startImport() {
           variant="tonal"
           class="mb-4"
         >
-          {{ result.processed }} orders processed across {{ result.pages }} pages.
+          {{ result.processed }} orders processed across {{ result.pages }} batches.
           <span v-if="result.errored > 0"> {{ result.errored }} errors encountered.</span>
         </v-alert>
 

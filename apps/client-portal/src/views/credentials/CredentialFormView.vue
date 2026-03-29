@@ -91,21 +91,21 @@ const zohoFieldMappings = ref<{
 const accountMappingFields = [
   { key: 'externalAccountId', label: 'External Account ID', description: 'Unique identifier for the account in Zoho', default: 'id' },
   { key: 'name', label: 'Account Name', description: 'Display name of the account', default: 'Account_Name' },
-  { key: 'depAccountId', label: 'DEP Account ID', description: 'Apple DEP enrollment account ID (optional)', default: 'DEP_Account_ID' },
+  { key: 'depAccountId', label: 'Enrollment Account ID', description: 'Apple Device Enrollment account ID (optional)', default: 'DEP_Account_ID' },
 ];
 
 const orderMappingFields = [
   { key: 'externalOrderId', label: 'External Order ID', description: 'Unique identifier for the order in Zoho', default: 'id' },
   { key: 'externalAccountId', label: 'Account ID on Order', description: 'Account reference on the order. Use dot-notation for nested fields (e.g. Account_Name.id)', default: 'Account_Name.id' },
   { key: 'externalOrderStatus', label: 'Order Status', description: 'Status field on the order', default: 'Status' },
-  { key: 'isDep', label: 'Is DEP', description: 'Boolean field indicating DEP eligibility', default: 'Is_DEP' },
+  { key: 'isDep', label: 'Enrollment Eligible', description: 'Field indicating if the order is eligible for Apple Device Enrollment', default: 'Is_DEP' },
   { key: 'po', label: 'Purchase Order', description: 'Purchase order number', default: 'PO_Number' },
 ];
 
 const orderItemMappingFields = [
   { key: 'sourceField', label: 'Line Items Field', description: 'Field on the order that contains the array of line items', default: 'Product_Details' },
   { key: 'serialNumbers', label: 'Serial Numbers', description: 'Field on each line item containing serial numbers (comma, semicolon, or newline separated)', default: 'Serial_Numbers' },
-  { key: 'isDep', label: 'Item Is DEP', description: 'Boolean field on each line item indicating DEP eligibility', default: 'Is_DEP' },
+  { key: 'isDep', label: 'Item Enrollment Eligible', description: 'Field on each line item indicating if it is eligible for Apple Device Enrollment', default: 'Is_DEP' },
 ];
 
 // Field definitions for each type
@@ -213,9 +213,9 @@ async function generateCertificate() {
     connectionData.value['certificate_pem'] = response.data.certificatePem;
     connectionData.value['certificate_expires_at'] = response.data.validTo;
 
-    successMessage.value = 'Certificate generated. Copy the certificate below and upload it to NetSuite.';
+    successMessage.value = 'Certificate generated successfully. Copy it below and upload it to your NetSuite integration record.';
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to generate certificate.';
+    error.value = err.response?.data?.message || 'Unable to generate the certificate. Please try again or contact support.';
   } finally {
     certGenerating.value = false;
   }
@@ -258,12 +258,12 @@ async function activateAndReplace() {
 
     // Then activate (disables old ones)
     await api.post(`/credentials/${credentialId.value}/activate`);
-    successMessage.value = 'New credential activated. Previous credential has been disabled.';
+    successMessage.value = 'Your new connection is now active. The previous connection has been disabled.';
     activeCredential.value = null;
     status.value = 'current';
     await loadExistingCredentials();
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to activate credential.';
+    error.value = err.response?.data?.message || 'Unable to activate this connection. Please try again or contact support.';
   } finally {
     activatingCredential.value = false;
   }
@@ -275,7 +275,7 @@ async function connectToZoho() {
   const clientId = connectionData.value['client_id'] as string;
   const clientSecret = connectionData.value['client_secret'] as string;
   if (!clientId || !clientSecret) {
-    error.value = 'Enter Client ID and Client Secret before connecting.';
+    error.value = 'Please enter your Client ID and Client Secret before connecting.';
     return;
   }
   zohoConnectLoading.value = true;
@@ -292,7 +292,7 @@ async function connectToZoho() {
     }));
     window.location.href = response.data.url;
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to initiate Zoho connection.';
+    error.value = err.response?.data?.message || 'Unable to start the Zoho connection. Please check your Client ID and try again.';
     zohoConnectLoading.value = false;
   }
 }
@@ -300,8 +300,8 @@ async function connectToZoho() {
 async function exchangeGrantToken() {
   const clientId = connectionData.value['client_id'] as string;
   const clientSecret = connectionData.value['client_secret'] as string;
-  if (!clientId || !clientSecret) { error.value = 'Enter Client ID and Client Secret before exchanging.'; return; }
-  if (!grantToken.value.trim()) { error.value = 'Paste the grant token from Zoho API Console.'; return; }
+  if (!clientId || !clientSecret) { error.value = 'Please enter your Client ID and Client Secret first.'; return; }
+  if (!grantToken.value.trim()) { error.value = 'Please paste the grant token you generated in your Zoho account.'; return; }
   grantTokenLoading.value = true;
   error.value = '';
   try {
@@ -314,7 +314,7 @@ async function exchangeGrantToken() {
     grantToken.value = '';
     showGrantTokenFlow.value = false;
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to exchange grant token.';
+    error.value = err.response?.data?.message || 'Unable to exchange the grant token. It may have expired — please generate a new one in Zoho and try again.';
   } finally {
     grantTokenLoading.value = false;
   }
@@ -325,7 +325,7 @@ async function exchangeGrantToken() {
 async function generateCsr() {
   const f = depCsrForm.value;
   if (!f.soldTo || !f.country || !f.state || !f.city || !f.organization) {
-    error.value = 'Please fill in all CSR fields (SoldTo, Country, State, City, Organization).';
+    error.value = 'Please fill in all required fields: SoldTo Number, Country, State, City, and Organization.';
     return;
   }
   csrGenerating.value = true;
@@ -343,9 +343,9 @@ async function generateCsr() {
     csrResult.value = response.data;
     // Auto-fill the private key into connection data
     connectionData.value['ssl_key'] = response.data.privateKey;
-    successMessage.value = 'CSR generated. Download it and send to Apple. Save this credential to preserve the private key.';
+    successMessage.value = 'Certificate request generated successfully. Download it and send it to Apple, then save this page to preserve your private key.';
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to generate CSR.';
+    error.value = err.response?.data?.message || 'Unable to generate the certificate request. Please try again or contact support.';
   } finally {
     csrGenerating.value = false;
   }
@@ -453,7 +453,7 @@ async function loadCredential() {
 
     await loadExistingCredentials();
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to load credential';
+    error.value = err.response?.data?.message || 'Unable to load this connection. Please try again or contact support.';
   } finally {
     loading.value = false;
   }
@@ -471,7 +471,7 @@ async function handleSubmit() {
     }
     router.push('/credentials');
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to save credential';
+    error.value = err.response?.data?.message || 'Unable to save this connection. Please check your entries and try again.';
   } finally {
     loading.value = false;
   }
@@ -487,9 +487,9 @@ async function saveAsDraft() {
     } else {
       await credentialsStore.create({ type: type.value, status: 'disabled', connectionData: data });
     }
-    successMessage.value = 'Saved as disabled. The current active connection is unchanged.';
+    successMessage.value = 'Saved as inactive. Your current active connection is unchanged — activate this one when you are ready to switch.';
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to save credential';
+    error.value = err.response?.data?.message || 'Unable to save this connection. Please check your entries and try again.';
   } finally {
     loading.value = false;
   }
@@ -564,7 +564,7 @@ onMounted(() => {
         <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
         <v-alert v-if="successMessage" type="success" class="mb-4" closable @click:close="successMessage = ''">{{ successMessage }}</v-alert>
         <v-alert v-if="zohoConnected && type === 'zoho'" type="success" variant="tonal" density="compact" class="mb-4">
-          Zoho connected — refresh token acquired.
+          Zoho is connected and ready to sync.
         </v-alert>
 
         <v-form @submit.prevent="handleSubmit">
@@ -580,7 +580,7 @@ onMounted(() => {
           <!-- Active credential info -->
           <v-alert v-if="!isEdit && activeCredential && (type === 'netsuite' || type === 'zoho' || type === 'dep')" type="warning" variant="tonal" density="compact" class="mb-4">
             An active {{ type }} credential already exists (#{{ activeCredential.id }}).
-            Save this as <strong>disabled</strong> to set it up without disrupting the current connection, then activate when ready.
+            Save this as <strong>inactive</strong> to set it up without disrupting the current connection, then activate when ready.
           </v-alert>
 
           <v-divider class="my-4"></v-divider>
@@ -589,19 +589,19 @@ onMounted(() => {
           <template v-if="type === 'dep'">
             <h3 class="text-h6 mb-4">Certificate Setup</h3>
             <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-              Apple DEP requires an SSL certificate for API authentication. Generate a CSR here,
-              send it to Apple, and they will return the signed certificate to complete the setup.
-              The current connection stays active until you activate the new credential.
+              Apple Device Enrollment requires an SSL certificate to communicate securely.
+              Generate a certificate request below, send it to Apple, and upload the signed certificate they return.
+              Your current connection stays active until you activate this new one.
             </v-alert>
 
             <v-card variant="outlined" class="mb-4">
               <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
-                Step 1: Generate Certificate Signing Request (CSR)
+                Step 1: Generate Certificate Request
               </v-card-title>
               <v-card-text>
                 <v-row>
                   <v-col cols="12" md="6">
-                    <v-text-field v-model="depCsrForm.soldTo" label="SoldTo Number" hint="10-digit SAP SoldTo (used in CN: GRX-<SoldTo>.ACC1914.Prod.AppleCare)" persistent-hint required density="compact" variant="outlined"></v-text-field>
+                    <v-text-field v-model="depCsrForm.soldTo" label="SoldTo Number" hint="Your 10-digit Apple SoldTo number (found in your Apple reseller agreement)" persistent-hint required density="compact" variant="outlined"></v-text-field>
                   </v-col>
                   <v-col cols="12" md="6">
                     <v-text-field v-model="depCsrForm.organization" label="Organization" hint="Legal company name" persistent-hint required density="compact" variant="outlined"></v-text-field>
@@ -630,16 +630,16 @@ onMounted(() => {
                   class="mt-2"
                 >
                   <v-icon start>mdi-certificate</v-icon>
-                  Generate Key &amp; CSR
+                  Generate Certificate Request
                 </v-btn>
 
                 <template v-if="csrResult">
                   <v-alert type="success" variant="tonal" density="compact" class="mt-4 mb-3">
-                    <div><strong>CSR generated.</strong> CN: {{ csrResult.subject.commonName }}</div>
-                    <div class="text-caption mt-1">Private key has been saved to this credential. Download the CSR below and send it to Apple.</div>
+                    <div><strong>Certificate request generated.</strong> Subject: {{ csrResult.subject.commonName }}</div>
+                    <div class="text-caption mt-1">Your private key has been saved automatically. Download the certificate request below and send it to Apple.</div>
                   </v-alert>
 
-                  <div class="text-subtitle-2 mb-2">CSR (send this to Apple)</div>
+                  <div class="text-subtitle-2 mb-2">Certificate Request (send this to Apple)</div>
                   <v-textarea
                     :model-value="csrResult.csrPem"
                     readonly
@@ -651,7 +651,7 @@ onMounted(() => {
                   <div class="d-flex ga-2 mt-1">
                     <v-btn size="small" variant="tonal" color="primary" @click="downloadCsr">
                       <v-icon start size="small">mdi-download</v-icon>
-                      Download CSR
+                      Download Request
                     </v-btn>
                     <v-btn size="small" variant="tonal" :color="csrCopied ? 'success' : 'default'" @click="copyCsrToClipboard">
                       <v-icon start size="small">{{ csrCopied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
@@ -668,13 +668,13 @@ onMounted(() => {
               </v-card-title>
               <v-card-text>
                 <v-alert type="info" variant="tonal" density="compact" class="mb-3">
-                  After Apple signs your CSR, paste the signed certificate PEM below.
-                  The private key was saved in Step 1 — do not regenerate it.
+                  Once Apple returns your signed certificate, paste it below.
+                  Your private key was saved in Step 1 — do not regenerate it.
                 </v-alert>
                 <v-textarea
                   v-model="connectionData['ssl_cert']"
-                  label="SSL Certificate (from Apple)"
-                  hint="Paste the PEM certificate Apple sent back"
+                  label="Signed Certificate (from Apple)"
+                  hint="Paste the certificate Apple sent back"
                   persistent-hint
                   rows="4"
                   variant="outlined"
@@ -711,8 +711,8 @@ onMounted(() => {
             <v-row class="mb-4">
               <v-col cols="12" md="6">
                 <v-card variant="outlined" class="pa-4 h-100">
-                  <div class="text-subtitle-2 mb-2">Option 1: OAuth Redirect</div>
-                  <div class="text-body-2 text-grey mb-3">Redirects you to Zoho to authorize. The refresh token is captured automatically.</div>
+                  <div class="text-subtitle-2 mb-2">Option 1: Connect Directly (Recommended)</div>
+                  <div class="text-body-2 text-grey mb-3">You will be redirected to Zoho to authorize access. The connection is set up automatically.</div>
                   <v-btn color="primary" variant="outlined" :loading="zohoConnectLoading" :disabled="zohoConnected" @click="connectToZoho" block>
                     <v-icon start>mdi-open-in-new</v-icon>
                     {{ zohoConnected ? 'Connected' : 'Connect to Zoho' }}
@@ -721,17 +721,17 @@ onMounted(() => {
               </v-col>
               <v-col cols="12" md="6">
                 <v-card variant="outlined" class="pa-4 h-100">
-                  <div class="text-subtitle-2 mb-2">Option 2: Grant Token</div>
+                  <div class="text-subtitle-2 mb-2">Option 2: Manual Token Entry</div>
                   <div class="text-body-2 text-grey mb-3">
-                    Generate a grant token in <a href="https://api-console.zoho.com/" target="_blank" rel="noopener">Zoho API Console</a> (Self Client) and paste it below.
+                    If the redirect option does not work, generate a grant token in your <a href="https://api-console.zoho.com/" target="_blank" rel="noopener">Zoho API Console</a> (Self Client) and paste it below.
                   </div>
                   <v-btn v-if="!showGrantTokenFlow" color="primary" variant="outlined" :disabled="zohoConnected" @click="showGrantTokenFlow = true" block>
                     <v-icon start>mdi-key-variant</v-icon>
                     {{ zohoConnected ? 'Connected' : 'Use Grant Token' }}
                   </v-btn>
                   <template v-if="showGrantTokenFlow && !zohoConnected">
-                    <v-text-field v-model="grantToken" label="Grant Token" placeholder="1000.abc123..." density="compact" variant="outlined" class="mb-2" hint="Valid for 2-3 minutes. Scopes: ZohoCRM.modules.accounts.READ,ZohoCRM.modules.salesorders.READ" persistent-hint></v-text-field>
-                    <v-btn color="primary" :loading="grantTokenLoading" @click="exchangeGrantToken" block size="small">Exchange for Refresh Token</v-btn>
+                    <v-text-field v-model="grantToken" label="Grant Token" placeholder="1000.abc123..." density="compact" variant="outlined" class="mb-2" hint="This token expires in 2-3 minutes. Make sure to use these scopes when generating it: ZohoCRM.modules.accounts.READ, ZohoCRM.modules.salesorders.READ" persistent-hint></v-text-field>
+                    <v-btn color="primary" :loading="grantTokenLoading" @click="exchangeGrantToken" block size="small">Connect with Token</v-btn>
                   </template>
                 </v-card>
               </v-col>
@@ -745,8 +745,8 @@ onMounted(() => {
             <v-row class="mb-4">
               <v-col cols="12" md="6">
                 <v-btn-toggle v-model="netsuiteAuthType" mandatory color="primary" variant="outlined" density="compact">
-                  <v-btn value="oauth1">OAuth 1.0a (TBA)</v-btn>
-                  <v-btn value="oauth2">OAuth 2.0 (M2M)</v-btn>
+                  <v-btn value="oauth1">Token-Based Auth</v-btn>
+                  <v-btn value="oauth2">Certificate Auth</v-btn>
                 </v-btn-toggle>
               </v-col>
             </v-row>
@@ -814,10 +814,10 @@ onMounted(() => {
                       <strong>Next steps:</strong>
                       <ol class="mt-1 mb-0 pl-4">
                         <li>Copy the certificate above</li>
-                        <li>In NetSuite, go to Setup &gt; Integration &gt; Manage Integrations</li>
-                        <li>Edit your integration record and paste the certificate</li>
-                        <li>Save — NetSuite will display a <strong>Certificate ID</strong></li>
-                        <li>Enter that Certificate ID in the field below</li>
+                        <li>Log in to NetSuite and navigate to Setup &gt; Integration &gt; Manage Integrations</li>
+                        <li>Open your integration record and paste the certificate into the certificate field</li>
+                        <li>Save the record — NetSuite will display a <strong>Certificate ID</strong></li>
+                        <li>Come back here and enter that Certificate ID in the field below</li>
                       </ol>
                     </v-alert>
                   </template>
@@ -829,7 +829,7 @@ onMounted(() => {
 
           <!-- ==================== CONNECTION FIELDS ==================== -->
           <h3 class="text-h6 mb-4">
-            {{ type === 'zoho' ? 'Connection Settings' : type === 'netsuite' ? (netsuiteAuthType === 'oauth2' ? 'OAuth 2.0 Settings' : 'OAuth 1.0a Settings') : 'Connection Data' }}
+            {{ type === 'zoho' ? 'Connection Settings' : type === 'netsuite' ? (netsuiteAuthType === 'oauth2' ? 'Certificate Auth Settings' : 'Token-Based Auth Settings') : 'Connection Details' }}
           </h3>
           <v-row>
             <template v-for="field in currentFields" :key="field">
@@ -880,8 +880,9 @@ onMounted(() => {
               <v-switch v-model="showFieldMappings" label="Custom field mappings" color="primary" hide-details density="compact" class="ml-4"></v-switch>
             </div>
             <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-              Map your Zoho CRM field names to our system fields. Leave blank to use the default Zoho field name.
-              Supports dot-notation for nested fields (e.g. <code>Account_Name.id</code>).
+              Tell us which fields in your Zoho CRM correspond to ours. Leave a field blank to use the default value shown.
+              For nested fields, use dot notation (e.g. <code>Account_Name.id</code>).
+              If you are unsure, start with the defaults — you can adjust them later.
             </v-alert>
             <template v-if="showFieldMappings">
               <div class="d-flex justify-end mb-3">

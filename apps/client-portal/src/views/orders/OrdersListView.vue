@@ -74,7 +74,7 @@ async function depAction(order: Order, action: 'enroll' | 'void' | 'override') {
       orderId: order.id,
       action: action.toUpperCase(),
       success: true,
-      message: `Transaction submitted: ${response.data.transactionId}`,
+      message: `Successfully submitted. Reference: ${response.data.transactionId}`,
     };
   } catch (err: any) {
     depActionResult.value = {
@@ -113,7 +113,7 @@ async function submitReturn() {
       orderId: depDialogOrder.value.id,
       action: 'RETURN',
       success: true,
-      message: `Return submitted: ${response.data.transactionId}`,
+      message: `Return successfully submitted. Reference: ${response.data.transactionId}`,
     };
   } catch (err: any) {
     depActionResult.value = {
@@ -250,22 +250,22 @@ onMounted(() => {
               </v-btn>
             </template>
             <v-list density="compact">
-              <v-list-subheader>Apple DEP Actions</v-list-subheader>
+              <v-list-subheader>Apple Enrollment Actions</v-list-subheader>
               <v-list-item @click="depAction(item, 'enroll')" prepend-icon="mdi-plus-circle">
-                <v-list-item-title>Enroll (OR)</v-list-item-title>
+                <v-list-item-title>Enroll Devices</v-list-item-title>
               </v-list-item>
               <v-list-item @click="openReturnDialog(item)" prepend-icon="mdi-undo">
-                <v-list-item-title>Return (RE)</v-list-item-title>
+                <v-list-item-title>Return Devices</v-list-item-title>
               </v-list-item>
               <v-list-item @click="depAction(item, 'override')" prepend-icon="mdi-swap-horizontal">
-                <v-list-item-title>Override (OV)</v-list-item-title>
+                <v-list-item-title>Override Enrollment</v-list-item-title>
               </v-list-item>
               <v-list-item @click="depAction(item, 'void')" prepend-icon="mdi-cancel">
-                <v-list-item-title>Void (VD)</v-list-item-title>
+                <v-list-item-title>Void Order</v-list-item-title>
               </v-list-item>
               <v-divider></v-divider>
               <v-list-item :to="`/orders/${item.id}`" prepend-icon="mdi-information">
-                <v-list-item-title>View DEP Status</v-list-item-title>
+                <v-list-item-title>View Enrollment Status</v-list-item-title>
               </v-list-item>
             </v-list>
           </v-menu>
@@ -278,10 +278,10 @@ onMounted(() => {
     <!-- Return Dialog -->
     <v-dialog v-model="depDialog" max-width="500">
       <v-card>
-        <v-card-title>Return Devices (RE)</v-card-title>
+        <v-card-title>Return Devices</v-card-title>
         <v-card-text>
           <div class="text-body-2 mb-3">
-            Enter serial numbers to return. Leave blank to return all DEP devices on this order.
+            Enter the serial numbers of the devices you want to return from Apple Device Enrollment. Leave blank to return all enrolled devices on this order. Returned devices will no longer be managed through Apple enrollment.
           </div>
           <v-textarea
             v-model="depReturnSerials"
@@ -303,11 +303,11 @@ onMounted(() => {
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card>
         <v-card-title>Delete Order</v-card-title>
-        <v-card-text>Are you sure you want to delete this order?</v-card-text>
+        <v-card-text>Are you sure you want to delete this order? This will remove it from the system. Any devices already enrolled with Apple will not be affected.</v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn variant="text" @click="deleteDialog = false">Cancel</v-btn>
-          <v-btn color="error" @click="handleDelete">Delete</v-btn>
+          <v-btn color="error" @click="handleDelete">Delete Order</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -317,12 +317,12 @@ onMounted(() => {
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon start>mdi-compare-horizontal</v-icon>
-          Order Reconciliation — Our System vs Apple DEP
+          Device Comparison — Our Records vs Apple Enrollment
         </v-card-title>
         <v-card-text>
           <div v-if="reconciling" class="text-center py-6">
             <v-progress-circular indeterminate color="primary" size="48" class="mb-4"></v-progress-circular>
-            <div>Fetching order details from Apple DEP...</div>
+            <div>Comparing your order data with Apple's enrollment records...</div>
           </div>
 
           <template v-if="reconcileResults">
@@ -332,9 +332,9 @@ onMounted(() => {
                   <th>Order</th>
                   <th>Match</th>
                   <th>Our Devices</th>
-                  <th>DEP Devices</th>
-                  <th>Only in Ours</th>
-                  <th>Only in DEP</th>
+                  <th>Apple Devices</th>
+                  <th>Only in Our Records</th>
+                  <th>Only in Apple</th>
                 </tr>
               </thead>
               <tbody>
@@ -371,20 +371,20 @@ onMounted(() => {
                 <v-card-text class="pa-3">
                   <v-row>
                     <v-col cols="6">
-                      <div class="text-caption font-weight-bold mb-1">Our System ({{ c.our.deviceCount }} devices)</div>
+                      <div class="text-caption font-weight-bold mb-1">Our Records ({{ c.our.deviceCount }} devices)</div>
                       <div v-for="s in c.our.devices" :key="s" class="text-caption" :class="c.differences.inOursNotDep.includes(s) ? 'text-warning font-weight-bold' : ''">
-                        {{ s }} {{ c.differences.inOursNotDep.includes(s) ? '(not in DEP)' : '' }}
+                        {{ s }} {{ c.differences.inOursNotDep.includes(s) ? '(not in Apple)' : '' }}
                       </div>
                       <div v-if="c.our.devices.length === 0" class="text-caption text-grey">No devices</div>
                     </v-col>
                     <v-col cols="6">
-                      <div class="text-caption font-weight-bold mb-1">Apple DEP ({{ c.dep ? c.dep.deviceCount : 0 }} devices)</div>
+                      <div class="text-caption font-weight-bold mb-1">Apple Enrollment ({{ c.dep ? c.dep.deviceCount : 0 }} devices)</div>
                       <template v-if="c.dep">
                         <div v-for="s in c.dep.devices" :key="s" class="text-caption" :class="c.differences.inDepNotOurs.includes(s) ? 'text-error font-weight-bold' : ''">
-                          {{ s }} {{ c.differences.inDepNotOurs.includes(s) ? '(not in ours)' : '' }}
+                          {{ s }} {{ c.differences.inDepNotOurs.includes(s) ? '(not in our records)' : '' }}
                         </div>
                       </template>
-                      <div v-else class="text-caption text-grey">Not found in DEP</div>
+                      <div v-else class="text-caption text-grey">Not found in Apple Enrollment</div>
                     </v-col>
                   </v-row>
                 </v-card-text>

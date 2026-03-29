@@ -21,7 +21,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       credentials.value = response.data;
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch credentials';
+      error.value = err.response?.data?.message || 'Unable to load your connections. Please check your internet connection and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -35,7 +35,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       const response = await api.get<Credential[]>(`/credentials/type/${type}`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch credentials';
+      error.value = err.response?.data?.message || 'Unable to load your connections. Please check your internet connection and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -49,7 +49,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       const response = await api.get<Credential>(`/credentials/${id}`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to fetch credential';
+      error.value = err.response?.data?.message || 'Unable to load this connection. Please try again or contact support if the problem continues.';
       throw err;
     } finally {
       loading.value = false;
@@ -64,7 +64,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       credentials.value.push(response.data);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to create credential';
+      error.value = err.response?.data?.message || 'Unable to save the new connection. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -82,7 +82,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       }
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to update credential';
+      error.value = err.response?.data?.message || 'Unable to update the connection. Please check your entries and try again.';
       throw err;
     } finally {
       loading.value = false;
@@ -96,7 +96,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       await api.delete(`/credentials/${id}`);
       credentials.value = credentials.value.filter((c) => c.id !== id);
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to delete credential';
+      error.value = err.response?.data?.message || 'Unable to remove this connection. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;
@@ -110,7 +110,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       const response = await api.post<Credential>(`/credentials/${id}/restore`);
       return response.data;
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to restore credential';
+      error.value = err.response?.data?.message || 'Unable to restore this connection. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;
@@ -124,7 +124,7 @@ export const useCredentialsStore = defineStore('credentials', () => {
       await api.delete(`/credentials/${id}/permanent`);
       credentials.value = credentials.value.filter((c) => c.id !== id);
     } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to permanently delete credential';
+      error.value = err.response?.data?.message || 'Unable to permanently delete this connection. Please try again or contact support.';
       throw err;
     } finally {
       loading.value = false;

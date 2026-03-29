@@ -34,7 +34,7 @@ const connectionStatusLabel = computed(() => {
   switch (connectionStatus.value.status) {
     case 'current': return 'Connected';
     case 'disabled': return 'Disabled';
-    case 'not_configured': return 'Not Configured';
+    case 'not_configured': return 'Not Set Up';
     case 'error': return 'Error';
     default: return connectionStatus.value.status;
   }
@@ -50,8 +50,8 @@ const depStatusColor = computed(() => {
 });
 
 const depStatusLabel = computed(() => {
-  if (!depStatus.value?.configured) return 'Not Configured';
-  if (depStatus.value.pendingCertUpload) return 'Awaiting Certificate';
+  if (!depStatus.value?.configured) return 'Not Set Up';
+  if (depStatus.value.pendingCertUpload) return 'Waiting for Apple';
   if (depStatus.value.daysUntilExpiry !== undefined && depStatus.value.daysUntilExpiry < 0) return 'Expired';
   if (depStatus.value.hasCertificate) return 'Active';
   return depStatus.value.status;
@@ -89,7 +89,7 @@ async function fetchDashboardData() {
     depStatus.value = depRes.data;
     syncSummary.value = syncRes.data;
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to load dashboard data';
+    error.value = err.response?.data?.message || 'Unable to load your dashboard. Please check your internet connection and try again.';
   } finally {
     loading.value = false;
   }
@@ -141,7 +141,7 @@ onMounted(() => {
                 <template v-slot:append><v-chip :color="connectionStatusColor" size="small">{{ connectionStatusLabel }}</v-chip></template>
               </v-list-item>
               <v-list-item v-if="connectionStatus.certificateExpiresAt">
-                <v-list-item-title>Cert Expires</v-list-item-title>
+                <v-list-item-title>Certificate Expires</v-list-item-title>
                 <template v-slot:append>{{ new Date(connectionStatus.certificateExpiresAt).toLocaleDateString() }}</template>
               </v-list-item>
             </v-list>
@@ -157,7 +157,7 @@ onMounted(() => {
       <!-- Apple DEP Connection Status Card -->
       <v-col cols="12" md="4">
         <v-card>
-          <v-card-title><v-icon left>mdi-apple</v-icon> Apple DEP</v-card-title>
+          <v-card-title><v-icon left>mdi-apple</v-icon> Apple Device Enrollment</v-card-title>
           <v-card-text>
             <!-- Expiration warning banner -->
             <v-alert
@@ -174,7 +174,7 @@ onMounted(() => {
 
             <!-- Pending cert upload -->
             <v-alert v-if="depStatus?.pendingCertUpload" type="info" density="compact" class="mb-3">
-              CSR generated — waiting for Apple to return the signed certificate.
+              Your certificate request has been generated and is waiting for Apple to return the signed certificate. This typically takes 1-2 business days.
             </v-alert>
 
             <v-list v-if="depStatus" density="compact">
@@ -205,7 +205,7 @@ onMounted(() => {
                   >
                     {{ new Date(depStatus.certificateExpiresAt).toLocaleDateString() }}
                     <span v-if="depStatus.daysUntilExpiry !== undefined" class="ml-1">
-                      ({{ depStatus.daysUntilExpiry < 0 ? 'expired' : depStatus.daysUntilExpiry + 'd' }})
+                      ({{ depStatus.daysUntilExpiry < 0 ? 'expired — renewal required' : depStatus.daysUntilExpiry + ' days remaining' }})
                     </span>
                   </v-chip>
                 </template>
@@ -222,7 +222,8 @@ onMounted(() => {
 
             <div v-if="!depStatus?.configured" class="text-center text-grey pa-4">
               <v-icon size="36" color="grey">mdi-apple</v-icon>
-              <div class="mt-2">DEP not configured</div>
+              <div class="mt-2">Apple Device Enrollment is not set up yet.</div>
+              <div class="text-caption mt-1">Go to Credentials to get started.</div>
             </div>
           </v-card-text>
           <v-card-actions>
@@ -297,7 +298,7 @@ onMounted(() => {
                       </v-list-item>
                     </v-list>
                   </v-card-text>
-                  <v-card-text v-else class="text-center text-grey">No accounts sync yet</v-card-text>
+                  <v-card-text v-else class="text-center text-grey">No accounts have been synced yet. Data will appear here after your first sync runs.</v-card-text>
                 </v-card>
               </v-col>
               <v-col cols="12" md="4">
@@ -316,13 +317,14 @@ onMounted(() => {
                       </v-list-item>
                     </v-list>
                   </v-card-text>
-                  <v-card-text v-else class="text-center text-grey">No orders sync yet</v-card-text>
+                  <v-card-text v-else class="text-center text-grey">No orders have been synced yet. Data will appear here after your first sync runs.</v-card-text>
                 </v-card>
               </v-col>
             </v-row>
             <div v-else class="text-center text-grey pa-4">
               <v-icon size="48" color="grey">mdi-sync-off</v-icon>
-              <div class="mt-2">No sync data available yet</div>
+              <div class="mt-2">No sync data available yet.</div>
+              <div class="text-caption mt-1">Once your connection is configured, data will sync automatically on a regular schedule.</div>
             </div>
           </v-card-text>
         </v-card>
