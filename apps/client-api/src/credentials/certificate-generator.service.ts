@@ -21,7 +21,7 @@ export interface GeneratedCertificate {
 }
 
 export interface GenerateCertificateOptions {
-  /** RSA key size in bits (default: 2048) */
+  /** RSA key size in bits (default: 4096, NetSuite requires >= 4096) */
   keySize?: number;
   /** Certificate validity in days (default: 730 = 2 years) */
   validityDays?: number;
@@ -41,7 +41,7 @@ export class CertificateGeneratorService {
    * Uses Node.js native crypto + openssl for certificate creation.
    */
   generate(options?: GenerateCertificateOptions): GeneratedCertificate {
-    const keySize = options?.keySize ?? 2048;
+    const keySize = options?.keySize ?? 4096;
     const validityDays = options?.validityDays ?? 730;
     const commonName = options?.commonName ?? 'DEP Sync Integration';
     const organization = options?.organization ?? 'DEP';
