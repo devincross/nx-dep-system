@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { NetsuiteApiClient } from 'netsuite-api-client';
+import * as crypto from 'crypto';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
 import { NetsuiteOAuthService } from './netsuite-oauth.service.js';
@@ -68,17 +68,73 @@ export class NetsuiteService {
   }
 
   /**
-   * Create NetsuiteApiClient instance for the given connection data
+   * Percent-encode per OAuth 1.0a spec (RFC 5849)
    */
-  private createClient(connectionData: NetsuiteConnectionData): NetsuiteApiClient {
-    return new NetsuiteApiClient({
-      consumer_key: connectionData.netsuite_consumer_key,
-      consumer_secret_key: connectionData.netsuite_consumer_secret,
-      token: connectionData.netsuite_token,
-      token_secret: connectionData.netsuite_token_secret,
-      realm: connectionData.netsuite_realm,
-      base_url: connectionData.netsuite_restlet_host.replace(/\/$/, ''),
+  private percentEncode(str: string): string {
+    return encodeURIComponent(str)
+      .replace(/!/g, '%21')
+      .replace(/\*/g, '%2A')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29');
+  }
+
+  /**
+   * Build OAuth 1.0a Authorization header (matches working test script)
+   */
+  private buildOAuth1Header(
+    url: string,
+    method: string,
+    consumerKey: string,
+    consumerSecret: string,
+    token: string,
+    tokenSecret: string,
+    realm: string,
+  ): string {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(16).toString('hex');
+
+    const urlObj = new URL(url);
+    const baseUrl = `${urlObj.origin}${urlObj.pathname}`;
+
+    // Collect all params (query + oauth)
+    const params: [string, string][] = [];
+    urlObj.searchParams.forEach((value, key) => {
+      params.push([key, value]);
     });
+
+    params.push(['oauth_consumer_key', consumerKey]);
+    params.push(['oauth_nonce', nonce]);
+    params.push(['oauth_signature_method', 'HMAC-SHA256']);
+    params.push(['oauth_timestamp', timestamp]);
+    params.push(['oauth_token', token]);
+    params.push(['oauth_version', '1.0']);
+
+    params.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+
+    const paramString = params
+      .map(([k, v]) => `${this.percentEncode(k)}=${this.percentEncode(v)}`)
+      .join('&');
+
+    const signatureBase = `${method.toUpperCase()}&${this.percentEncode(baseUrl)}&${this.percentEncode(paramString)}`;
+    const signingKey = `${this.percentEncode(consumerSecret)}&${this.percentEncode(tokenSecret)}`;
+    const signature = crypto
+      .createHmac('sha256', signingKey)
+      .update(signatureBase)
+      .digest('base64');
+
+    const headerParts = [
+      `realm="${this.percentEncode(realm)}"`,
+      `oauth_consumer_key="${this.percentEncode(consumerKey)}"`,
+      `oauth_nonce="${this.percentEncode(nonce)}"`,
+      `oauth_signature="${this.percentEncode(signature)}"`,
+      `oauth_signature_method="HMAC-SHA256"`,
+      `oauth_timestamp="${timestamp}"`,
+      `oauth_token="${this.percentEncode(token)}"`,
+      `oauth_version="1.0"`,
+    ];
+
+    return `OAuth ${headerParts.join(', ')}`;
   }
 
   /**
@@ -139,7 +195,7 @@ export class NetsuiteService {
   }
 
   /**
-   * Make request using OAuth 1.0a (TBA)
+   * Make request using OAuth 1.0a (TBA) — uses fetch with manual signing
    */
   private async makeOAuth1Request<T>(
     connectionData: NetsuiteConnectionData,
@@ -147,42 +203,57 @@ export class NetsuiteService {
     restletUrl: string,
     data?: Record<string, unknown>
   ): Promise<NetsuiteResponse<T>> {
+    const realm = connectionData.netsuite_realm || connectionData.netsuite_account;
     this.logger.log(`[OAuth1] ${method} ${restletUrl}`);
-    this.logger.debug(`[OAuth1] realm=${connectionData.netsuite_realm}, account=${connectionData.netsuite_account}`);
+    this.logger.debug(`[OAuth1] realm=${realm}, account=${connectionData.netsuite_account}`);
     this.logger.debug(`[OAuth1] consumer_key=${connectionData.netsuite_consumer_key?.slice(0, 8)}...`);
     this.logger.debug(`[OAuth1] token=${connectionData.netsuite_token?.slice(0, 8)}...`);
 
-    const client = this.createClient(connectionData);
-
-    const requestOptions: { method: string; restletUrl: string; body?: string } = {
-      method,
+    const authHeader = this.buildOAuth1Header(
       restletUrl,
+      method,
+      connectionData.netsuite_consumer_key!,
+      connectionData.netsuite_consumer_secret!,
+      connectionData.netsuite_token!,
+      connectionData.netsuite_token_secret!,
+      realm,
+    );
+
+    const headers: Record<string, string> = {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json',
     };
 
-    // Only add body for non-GET requests
+    const fetchOptions: RequestInit = { method, headers };
+
     if (method !== 'GET' && data) {
-      requestOptions.body = JSON.stringify(data);
-      this.logger.debug(`[OAuth1] body=${requestOptions.body}`);
+      fetchOptions.body = JSON.stringify(data);
+      this.logger.debug(`[OAuth1] body=${fetchOptions.body}`);
     }
 
     try {
-      const response = await client.request(requestOptions);
-      this.logger.log(`[OAuth1] response status=${response.status ?? 'ok'}, data type=${typeof response.data}, isArray=${Array.isArray(response.data)}`);
-      if (Array.isArray(response.data)) {
-        this.logger.log(`[OAuth1] response count=${response.data.length}`);
+      const response = await fetch(restletUrl, fetchOptions);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`[OAuth1] request failed: ${response.status} ${response.statusText}`);
+        this.logger.error(`[OAuth1] response body=${errorText.slice(0, 500)}`);
+        throw new Error(`Request failed with status code ${response.status} (${response.statusText}): ${method} ${restletUrl}\n${errorText}`);
       }
-      this.logger.debug(`[OAuth1] response body=${JSON.stringify(response.data)?.slice(0, 500)}`);
+
+      const responseData = await response.json() as T;
+      this.logger.log(`[OAuth1] response status=${response.status}, data type=${typeof responseData}, isArray=${Array.isArray(responseData)}`);
+      if (Array.isArray(responseData)) {
+        this.logger.log(`[OAuth1] response count=${(responseData as unknown[]).length}`);
+      }
 
       return {
         success: true,
-        data: response.data as T,
+        data: responseData,
       };
     } catch (error: unknown) {
-      const err = error as Record<string, unknown>;
-      this.logger.error(`[OAuth1] request failed: ${err?.['message'] ?? error}`);
-      this.logger.error(`[OAuth1] status=${err?.['status'] ?? err?.['statusCode'] ?? 'N/A'}`);
-      if (err?.['response']) {
-        this.logger.error(`[OAuth1] response body=${JSON.stringify(err['response'])?.slice(0, 500)}`);
+      if (error instanceof Error) {
+        this.logger.error(`[OAuth1] request failed: ${error.message}`);
       }
       throw error;
     }
