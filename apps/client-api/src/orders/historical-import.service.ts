@@ -285,7 +285,7 @@ export class HistoricalImportService {
     const scriptId = connData['netsuite_order_script_id'] as string;
     const realm = (connData['netsuite_realm'] || connData['netsuite_account']) as string;
 
-    return async (startDate, _limit, _page) => {
+    return async (startDate, limit, page) => {
       const response = await this.netsuiteService.makeRequest<
         Record<string, unknown>[] | Record<string, unknown>
       >(tenant.db, 'GET', scriptId, {
