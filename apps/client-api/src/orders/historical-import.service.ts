@@ -13,7 +13,7 @@ import {
   credentials,
 } from '@org/database';
 
-interface ImportResult {
+export interface ImportResult {
   processed: number;
   created: number;
   updated: number;

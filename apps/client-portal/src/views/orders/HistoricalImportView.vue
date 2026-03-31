@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import api from '../../services/api';
 
 const startDate = ref('');
@@ -17,6 +17,35 @@ const result = ref<{
   pages: number;
 } | null>(null);
 
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const response = await api.get('/orders/historical-import/status');
+    const job = response.data;
+
+    if (job.status === 'completed') {
+      stopPolling();
+      importing.value = false;
+      result.value = job.result;
+    } else if (job.status === 'error') {
+      stopPolling();
+      importing.value = false;
+      error.value = job.error || 'The import encountered an error. Please try again.';
+    }
+    // status === 'running' → keep polling
+  } catch {
+    // Ignore poll errors, will retry on next interval
+  }
+}
+
 async function startImport() {
   if (!startDate.value) {
     error.value = 'Please select a start date.';
@@ -33,13 +62,24 @@ async function startImport() {
       pageSize: pageSize.value,
       pageDelayMs: pageDelayMs.value,
     });
-    result.value = response.data;
+
+    if (response.data.status === 'started' || response.data.status === 'already_running') {
+      // Import is running in the background — poll for completion
+      pollTimer = setInterval(pollStatus, 3000);
+    } else {
+      // Unexpected direct result (shouldn't happen, but handle gracefully)
+      importing.value = false;
+      result.value = response.data;
+    }
   } catch (err: any) {
-    error.value = err.response?.data?.message || err.message || 'The import could not be completed. Please check your connection settings and try again.';
-  } finally {
     importing.value = false;
+    error.value = err.response?.data?.message || err.message || 'The import could not be started. Please check your connection settings and try again.';
   }
 }
+
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>
@@ -113,8 +153,8 @@ async function startImport() {
         <v-progress-circular indeterminate color="primary" size="48" class="mb-4"></v-progress-circular>
         <div class="text-h6">Importing orders...</div>
         <div class="text-body-2 text-grey mt-2">
-          This may take several minutes depending on the number of orders.
-          Batches are fetched with a {{ pageDelayMs }}ms delay between each request.
+          This is running in the background and may take several minutes depending on the number of orders.
+          This page will update automatically when the import is complete.
         </div>
       </v-card-text>
     </v-card>
