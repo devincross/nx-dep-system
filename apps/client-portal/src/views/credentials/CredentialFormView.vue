@@ -55,6 +55,9 @@ const existingCredentials = ref<Credential[]>([]);
 const activeCredential = ref<Credential | null>(null);
 const activatingCredential = ref(false);
 
+// DEP setup mode: 'new' = generate CSR, 'migrate' = paste existing key/cert
+const depSetupMode = ref<'new' | 'migrate'>('new');
+
 // DEP CSR generation state
 const csrGenerating = ref(false);
 const csrResult = ref<{ privateKey: string; csrPem: string; subject: any } | null>(null);
@@ -449,6 +452,10 @@ async function loadCredential() {
       depCsrForm.value.country = (credential.connectionData['csr_country'] as string) || '';
       depCsrForm.value.state = (credential.connectionData['csr_state'] as string) || '';
       depCsrForm.value.city = (credential.connectionData['csr_city'] as string) || '';
+      // If key/cert already exist, default to migrate mode
+      if (credential.connectionData['ssl_key'] && credential.connectionData['ssl_cert']) {
+        depSetupMode.value = 'migrate';
+      }
     }
 
     await loadExistingCredentials();
@@ -585,103 +592,147 @@ onMounted(() => {
 
           <v-divider class="my-4"></v-divider>
 
-          <!-- ==================== DEP CSR SECTION ==================== -->
+          <!-- ==================== DEP CERTIFICATE SECTION ==================== -->
           <template v-if="type === 'dep'">
             <h3 class="text-h6 mb-4">Certificate Setup</h3>
-            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-              Apple Device Enrollment requires an SSL certificate to communicate securely.
-              Generate a certificate request below, send it to Apple, and upload the signed certificate they return.
-              Your current connection stays active until you activate this new one.
-            </v-alert>
 
-            <v-card variant="outlined" class="mb-4">
-              <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
-                Step 1: Generate Certificate Request
-              </v-card-title>
-              <v-card-text>
-                <v-row>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model="depCsrForm.soldTo" label="SoldTo Number" hint="Your 10-digit Apple SoldTo number (found in your Apple reseller agreement)" persistent-hint required density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model="depCsrForm.organization" label="Organization" hint="Legal company name" persistent-hint required density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                </v-row>
-                <v-row>
-                  <v-col cols="12" md="4">
-                    <v-text-field v-model="depCsrForm.organizationalUnit" label="Organizational Unit" hint="Department (optional)" persistent-hint density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <v-text-field v-model="depCsrForm.city" label="City" required density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="2">
-                    <v-text-field v-model="depCsrForm.state" label="State" required density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="2">
-                    <v-text-field v-model="depCsrForm.country" label="Country" hint="2-letter" persistent-hint maxlength="2" counter required density="compact" variant="outlined"></v-text-field>
-                  </v-col>
-                </v-row>
+            <v-btn-toggle v-model="depSetupMode" mandatory color="primary" variant="outlined" density="compact" class="mb-4">
+              <v-btn value="new">New Certificate</v-btn>
+              <v-btn value="migrate">Migrate Existing</v-btn>
+            </v-btn-toggle>
 
-                <v-btn
-                  color="primary"
-                  variant="outlined"
-                  :loading="csrGenerating"
-                  @click="generateCsr"
-                  class="mt-2"
-                >
-                  <v-icon start>mdi-certificate</v-icon>
-                  Generate Certificate Request
-                </v-btn>
+            <!-- ===== NEW CERTIFICATE FLOW (CSR) ===== -->
+            <template v-if="depSetupMode === 'new'">
+              <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+                Apple Device Enrollment requires an SSL certificate to communicate securely.
+                Generate a certificate request below, send it to Apple, and upload the signed certificate they return.
+                Your current connection stays active until you activate this new one.
+              </v-alert>
 
-                <template v-if="csrResult">
-                  <v-alert type="success" variant="tonal" density="compact" class="mt-4 mb-3">
-                    <div><strong>Certificate request generated.</strong> Subject: {{ csrResult.subject.commonName }}</div>
-                    <div class="text-caption mt-1">Your private key has been saved automatically. Download the certificate request below and send it to Apple.</div>
+              <v-card variant="outlined" class="mb-4">
+                <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
+                  Step 1: Generate Certificate Request
+                </v-card-title>
+                <v-card-text>
+                  <v-row>
+                    <v-col cols="12" md="6">
+                      <v-text-field v-model="depCsrForm.soldTo" label="SoldTo Number" hint="Your 10-digit Apple SoldTo number (found in your Apple reseller agreement)" persistent-hint required density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field v-model="depCsrForm.organization" label="Organization" hint="Legal company name" persistent-hint required density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                  </v-row>
+                  <v-row>
+                    <v-col cols="12" md="4">
+                      <v-text-field v-model="depCsrForm.organizationalUnit" label="Organizational Unit" hint="Department (optional)" persistent-hint density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="4">
+                      <v-text-field v-model="depCsrForm.city" label="City" required density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="2">
+                      <v-text-field v-model="depCsrForm.state" label="State" required density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="2">
+                      <v-text-field v-model="depCsrForm.country" label="Country" hint="2-letter" persistent-hint maxlength="2" counter required density="compact" variant="outlined"></v-text-field>
+                    </v-col>
+                  </v-row>
+
+                  <v-btn
+                    color="primary"
+                    variant="outlined"
+                    :loading="csrGenerating"
+                    @click="generateCsr"
+                    class="mt-2"
+                  >
+                    <v-icon start>mdi-certificate</v-icon>
+                    Generate Certificate Request
+                  </v-btn>
+
+                  <template v-if="csrResult">
+                    <v-alert type="success" variant="tonal" density="compact" class="mt-4 mb-3">
+                      <div><strong>Certificate request generated.</strong> Subject: {{ csrResult.subject.commonName }}</div>
+                      <div class="text-caption mt-1">Your private key has been saved automatically. Download the certificate request below and send it to Apple.</div>
+                    </v-alert>
+
+                    <div class="text-subtitle-2 mb-2">Certificate Request (send this to Apple)</div>
+                    <v-textarea
+                      :model-value="csrResult.csrPem"
+                      readonly
+                      rows="6"
+                      variant="outlined"
+                      density="compact"
+                      class="font-monospace text-body-2"
+                    ></v-textarea>
+                    <div class="d-flex ga-2 mt-1">
+                      <v-btn size="small" variant="tonal" color="primary" @click="downloadCsr">
+                        <v-icon start size="small">mdi-download</v-icon>
+                        Download Request
+                      </v-btn>
+                      <v-btn size="small" variant="tonal" :color="csrCopied ? 'success' : 'default'" @click="copyCsrToClipboard">
+                        <v-icon start size="small">{{ csrCopied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
+                        {{ csrCopied ? 'Copied' : 'Copy' }}
+                      </v-btn>
+                    </div>
+                  </template>
+                </v-card-text>
+              </v-card>
+
+              <v-card variant="outlined" class="mb-4">
+                <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
+                  Step 2: Upload Signed Certificate from Apple
+                </v-card-title>
+                <v-card-text>
+                  <v-alert type="info" variant="tonal" density="compact" class="mb-3">
+                    Once Apple returns your signed certificate, paste it below.
+                    Your private key was saved in Step 1 — do not regenerate it.
                   </v-alert>
-
-                  <div class="text-subtitle-2 mb-2">Certificate Request (send this to Apple)</div>
                   <v-textarea
-                    :model-value="csrResult.csrPem"
-                    readonly
-                    rows="6"
+                    v-model="connectionData['ssl_cert']"
+                    label="Signed Certificate (from Apple)"
+                    hint="Paste the certificate Apple sent back"
+                    persistent-hint
+                    rows="4"
                     variant="outlined"
                     density="compact"
-                    class="font-monospace text-body-2"
                   ></v-textarea>
-                  <div class="d-flex ga-2 mt-1">
-                    <v-btn size="small" variant="tonal" color="primary" @click="downloadCsr">
-                      <v-icon start size="small">mdi-download</v-icon>
-                      Download Request
-                    </v-btn>
-                    <v-btn size="small" variant="tonal" :color="csrCopied ? 'success' : 'default'" @click="copyCsrToClipboard">
-                      <v-icon start size="small">{{ csrCopied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
-                      {{ csrCopied ? 'Copied' : 'Copy' }}
-                    </v-btn>
-                  </div>
-                </template>
-              </v-card-text>
-            </v-card>
+                </v-card-text>
+              </v-card>
+            </template>
 
-            <v-card variant="outlined" class="mb-4">
-              <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
-                Step 2: Upload Signed Certificate from Apple
-              </v-card-title>
-              <v-card-text>
-                <v-alert type="info" variant="tonal" density="compact" class="mb-3">
-                  Once Apple returns your signed certificate, paste it below.
-                  Your private key was saved in Step 1 — do not regenerate it.
-                </v-alert>
-                <v-textarea
-                  v-model="connectionData['ssl_cert']"
-                  label="Signed Certificate (from Apple)"
-                  hint="Paste the certificate Apple sent back"
-                  persistent-hint
-                  rows="4"
-                  variant="outlined"
-                  density="compact"
-                ></v-textarea>
-              </v-card-text>
-            </v-card>
+            <!-- ===== MIGRATE EXISTING FLOW ===== -->
+            <template v-if="depSetupMode === 'migrate'">
+              <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+                If you already have a private key and certificate from an existing Apple DEP setup, paste them below.
+                This is typically used when migrating from another system.
+              </v-alert>
+
+              <v-card variant="outlined" class="mb-4">
+                <v-card-title class="text-subtitle-1 bg-blue-grey-lighten-5 py-2 px-4">
+                  Existing Certificate &amp; Key
+                </v-card-title>
+                <v-card-text>
+                  <v-textarea
+                    v-model="connectionData['ssl_key']"
+                    label="Private Key (PEM)"
+                    hint="Paste your existing private key in PEM format (begins with -----BEGIN)"
+                    persistent-hint
+                    rows="4"
+                    variant="outlined"
+                    density="compact"
+                    class="mb-4"
+                  ></v-textarea>
+                  <v-textarea
+                    v-model="connectionData['ssl_cert']"
+                    label="Certificate (PEM)"
+                    hint="Paste your existing signed certificate in PEM format"
+                    persistent-hint
+                    rows="4"
+                    variant="outlined"
+                    density="compact"
+                  ></v-textarea>
+                </v-card-text>
+              </v-card>
+            </template>
 
             <v-divider class="my-4"></v-divider>
           </template>
@@ -829,7 +880,7 @@ onMounted(() => {
 
           <!-- ==================== CONNECTION FIELDS ==================== -->
           <h3 class="text-h6 mb-4">
-            {{ type === 'zoho' ? 'Connection Settings' : type === 'netsuite' ? (netsuiteAuthType === 'oauth2' ? 'Certificate Auth Settings' : 'Token-Based Auth Settings') : 'Connection Details' }}
+            {{ type === 'zoho' ? 'Connection Settings' : type === 'netsuite' ? (netsuiteAuthType === 'oauth2' ? 'Certificate Auth Settings' : 'Token-Based Auth Settings') : type === 'dep' ? 'Apple DEP Account Details' : 'Connection Details' }}
           </h3>
           <v-row>
             <template v-for="field in currentFields" :key="field">

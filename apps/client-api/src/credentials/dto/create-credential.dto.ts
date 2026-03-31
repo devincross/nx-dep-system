@@ -74,7 +74,7 @@ function IsValidConnectionData(validationOptions?: ValidationOptions) {
             return 'connectionData for netsuite type must include: netsuite_restlet_host, netsuite_account, netsuite_deploy_id, netsuite_order_script_id, netsuite_account_script_id, mapping_class. For OAuth 2.0 (auth_type="oauth2"): client_id, certificate_id, private_key. For OAuth 1.0a (auth_type="oauth1" or not set): netsuite_realm, netsuite_consumer_key, netsuite_consumer_secret, netsuite_token, netsuite_token_secret.';
           }
           if (obj.type === 'dep') {
-            return 'connectionData for dep type must include all required fields: ssl_key (base64), ssl_cert (base64), apple_api_url, dep_reseller_id, sap_ship_to, sap_sold_to';
+            return 'connectionData for dep type must include: apple_api_url, dep_reseller_id, sap_ship_to, sap_sold_to. Optional: ssl_key, ssl_cert (provide these when migrating an existing connection).';
           }
           return 'connectionData must be a valid object';
         },
