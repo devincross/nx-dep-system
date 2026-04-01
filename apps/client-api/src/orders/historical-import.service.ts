@@ -65,6 +65,11 @@ interface ZohoFieldMappingsConfig {
   };
 }
 
+/** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
+function normalizeSerial(sn: string): string {
+  return sn.startsWith('S') ? sn.slice(1) : sn;
+}
+
 @Injectable()
 export class HistoricalImportService {
   private readonly logger = new Logger(HistoricalImportService.name);
@@ -347,7 +352,7 @@ export class HistoricalImportService {
     const items: MappedOrderItem[] = [];
 
     for (const product of products) {
-      const serial = product['serial'] ? String(product['serial']).trim() : '';
+      const serial = product['serial'] ? normalizeSerial(String(product['serial']).trim()) : '';
       if (!serial) continue;
       items.push({
         serialNumber: serial,
@@ -383,7 +388,7 @@ export class HistoricalImportService {
           item['serialnumbers'] ?? item['serial_numbers'] ??
           item['custcol_serial_numbers'] ?? '';
         if (!serialField) continue;
-        for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean)) {
+        for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => normalizeSerial(s.trim())).filter(Boolean)) {
           items.push({
             serialNumber: sn,
             isDep: Boolean(item['custcol_is_dep'] ?? item['is_dep'] ?? false),
@@ -444,7 +449,7 @@ export class HistoricalImportService {
           const item = rawItem as Record<string, unknown>;
           const serialField = this.resolveFieldPath(item, itemsCfg.serialNumbers);
           if (!serialField) continue;
-          for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => s.trim()).filter(Boolean)) {
+          for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => normalizeSerial(s.trim())).filter(Boolean)) {
             const depVal = this.resolveFieldPath(item, itemsCfg.isDep);
             items.push({
               serialNumber: sn,

@@ -101,10 +101,11 @@ export class NetsuiteBaseMapper implements MapperPort {
 
     const serialStr = String(serialField);
     
-    // Split by common delimiters
+    // Split by common delimiters and strip leading 'S' prefix
     return serialStr
       .split(/[,;\n\r]+/)
       .map(s => s.trim())
+      .map(s => s.startsWith('S') ? s.slice(1) : s)
       .filter(s => s.length > 0);
   }
 

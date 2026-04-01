@@ -3,6 +3,11 @@ import { eq, isNull, and, inArray } from 'drizzle-orm';
 import { TenantDb, orders, orderItems, Order, OrderItem } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
+/** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
+function normalizeSerial(sn: string): string {
+  return sn.startsWith('S') ? sn.slice(1) : sn;
+}
+
 // Order with items
 export interface OrderWithItems extends Order {
   items: OrderItem[];
@@ -137,8 +142,8 @@ export class OrdersService {
     orderId: number,
     items: CreateOrderItemDto[]
   ): Promise<OrderItem[]> {
-    // Validate serial numbers are unique among non-deleted items
-    const serialNumbers = items.map((item) => item.serialNumber);
+    // Normalize serial numbers (strip leading S) and validate uniqueness
+    const serialNumbers = items.map((item) => normalizeSerial(item.serialNumber));
     await this.validateSerialNumbersUnique(db, serialNumbers);
 
     const now = new Date();
@@ -147,7 +152,7 @@ export class OrdersService {
       await db.insert(orderItems).values({
         orderId,
         isDep: item.isDep ?? false,
-        serialNumber: item.serialNumber,
+        serialNumber: normalizeSerial(item.serialNumber),
         depStatus: item.depStatus,
         createdAt: now,
         updatedAt: now,
@@ -235,31 +240,36 @@ export class OrdersService {
       throw new NotFoundException(`Order item with ID "${itemId}" not found`);
     }
 
+    // Normalize serial number if provided
+    const normalizedSerial = updateData.serialNumber !== undefined
+      ? normalizeSerial(updateData.serialNumber)
+      : undefined;
+
     // If updating serial number, validate it's unique (excluding current item)
     if (
-      updateData.serialNumber !== undefined &&
-      updateData.serialNumber !== itemResult[0].serialNumber
+      normalizedSerial !== undefined &&
+      normalizedSerial !== itemResult[0].serialNumber
     ) {
       const existing = await db
         .select()
         .from(orderItems)
         .where(
           and(
-            eq(orderItems.serialNumber, updateData.serialNumber),
+            eq(orderItems.serialNumber, normalizedSerial),
             isNull(orderItems.deletedAt)
           )
         );
 
       if (existing.length > 0) {
         throw new ConflictException(
-          `Serial number already exists: ${updateData.serialNumber}`
+          `Serial number already exists: ${normalizedSerial}`
         );
       }
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (updateData.isDep !== undefined) update['isDep'] = updateData.isDep;
-    if (updateData.serialNumber !== undefined) update['serialNumber'] = updateData.serialNumber;
+    if (normalizedSerial !== undefined) update['serialNumber'] = normalizedSerial;
     if (updateData.depStatus !== undefined) update['depStatus'] = updateData.depStatus;
 
     await db.update(orderItems).set(update).where(eq(orderItems.id, itemId));

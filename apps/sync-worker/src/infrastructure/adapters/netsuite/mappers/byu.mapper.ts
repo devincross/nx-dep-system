@@ -52,7 +52,8 @@ export class ByuMapper implements MapperPort {
     const items: OrderItemEntity[] = [];
 
     for (const product of products) {
-      const serial = product['serial'] ? String(product['serial']).trim() : '';
+      const rawSerial = product['serial'] ? String(product['serial']).trim() : '';
+      const serial = rawSerial.startsWith('S') ? rawSerial.slice(1) : rawSerial;
 
       if (!serial) {
         continue;

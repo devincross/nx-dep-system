@@ -160,9 +160,11 @@ export class DynamicZohoMapper implements MapperPort {
       return [];
     }
 
+    // Split by common delimiters and strip leading 'S' prefix
     return String(serialField)
       .split(/[,;\n\r]+/)
       .map((s) => s.trim())
+      .map((s) => s.startsWith('S') ? s.slice(1) : s)
       .filter((s) => s.length > 0);
   }
 
