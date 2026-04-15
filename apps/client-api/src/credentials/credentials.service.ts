@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { eq, isNull, and, desc } from 'drizzle-orm';
+import { createPublicKey, X509Certificate } from 'crypto';
 import { TenantDb, credentials, Credential, ConnectionData } from '@org/database';
 import { CreateCredentialDto, UpdateCredentialDto } from './dto/index.js';
 import { EncryptionService } from '../encryption/encryption.service.js';
@@ -13,6 +14,7 @@ export interface DecryptedCredential extends Omit<Credential, 'connectionData'> 
 // NetSuite connection data with certificate fields
 interface NetsuiteConnectionData {
   auth_type?: 'oauth1' | 'oauth2';
+  private_key?: string;
   certificate_pem?: string;
   certificate_expires_at?: string;
   [key: string]: unknown;
@@ -40,6 +42,33 @@ export class CredentialsService {
   }
 
   /**
+   * Verify that a private key and certificate are a matching pair.
+   * Compares the public key derived from the private key with the
+   * public key embedded in the certificate.
+   */
+  private verifyKeyAndCertMatch(privateKeyPem: string, certificatePem: string): void {
+    try {
+      const pubFromKey = createPublicKey(privateKeyPem).export({ type: 'spki', format: 'der' });
+      const cert = new X509Certificate(certificatePem);
+      const pubFromCert = cert.publicKey.export({ type: 'spki', format: 'der' });
+
+      if (!pubFromKey.equals(pubFromCert)) {
+        throw new BadRequestException(
+          'Private key does not match the certificate. Please generate a new certificate or ensure the correct private key is provided.'
+        );
+      }
+
+      this.logger.log('Private key and certificate match verified');
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error(`Key/cert verification failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new BadRequestException(
+        'Unable to verify private key and certificate. Ensure both are valid PEM format.'
+      );
+    }
+  }
+
+  /**
    * Process connection data to extract certificate expiration for NetSuite OAuth2
    */
   private processConnectionData(
@@ -55,6 +84,14 @@ export class CredentialsService {
     // Only process for OAuth2 with certificate
     if (nsData.auth_type !== 'oauth2' || !nsData.certificate_pem) {
       return connectionData;
+    }
+
+    // Verify key and cert match when both are present
+    if (nsData.private_key && nsData.certificate_pem) {
+      this.verifyKeyAndCertMatch(
+        nsData.private_key as string,
+        nsData.certificate_pem as string,
+      );
     }
 
     // Parse certificate to get expiration date
