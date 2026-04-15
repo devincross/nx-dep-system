@@ -424,12 +424,24 @@ export class DepActionsService {
 
   private async logTransaction(db: TenantDb, orderId: number, txnId: string, orderType: string, request: unknown, response: unknown) {
     const resp = response as any;
+
+    let status: 'pending' | 'in_progress' | 'complete' | 'error' | 'posted_with_errors';
+    if (resp.errorCode || resp.errorMessage) {
+      status = 'error';
+    } else if (orderType === 'SC') {
+      status = 'complete';
+    } else if (resp.deviceEnrollmentTransactionId) {
+      status = 'in_progress';
+    } else {
+      status = 'error';
+    }
+
     await db.insert(depTransactions).values({
       orderId,
       transactionId: txnId,
       deviceEnrollmentTransactionId: resp.deviceEnrollmentTransactionId || null,
       orderType: orderType as any,
-      status: resp.deviceEnrollmentTransactionId ? 'in_progress' : 'error',
+      status,
       requestPayload: JSON.stringify(request),
       responsePayload: JSON.stringify(response),
       errorCode: resp.errorCode || null,
