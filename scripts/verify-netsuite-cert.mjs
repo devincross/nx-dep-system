@@ -93,8 +93,8 @@ async function main() {
 
   console.log('\n--- Key Verification ---');
   try {
-    const keyModulus = execSync(`openssl pkey -in ${keyFile} -pubout -outform DER 2>/dev/null | openssl md5`, { encoding: 'utf8' }).trim();
-    const certModulus = execSync(`openssl x509 -in ${certFile} -pubkey -noout -outform DER 2>/dev/null | openssl md5`, { encoding: 'utf8' }).trim();
+    const keyModulus = execSync(`openssl pkey -in ${keyFile} -pubout 2>/dev/null | openssl md5`, { encoding: 'utf8' }).trim();
+    const certModulus = execSync(`openssl x509 -in ${certFile} -pubkey -noout 2>/dev/null | openssl md5`, { encoding: 'utf8' }).trim();
 
     console.log(`Private key hash:  ${keyModulus}`);
     console.log(`Certificate hash:  ${certModulus}`);

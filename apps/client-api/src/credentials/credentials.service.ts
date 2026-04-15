@@ -30,16 +30,6 @@ export class CredentialsService {
   ) {}
 
   /**
-   * Log whether private_key and certificate_pem are present and their fingerprints
-   */
-  private logKeyPresence(phase: string, data: ConnectionData): void {
-    const pk = data['private_key'] as string | undefined;
-    const cert = data['certificate_pem'] as string | undefined;
-    this.logger.log(`[${phase}] private_key: ${pk ? `present (${pk.length} chars, starts: ${pk.substring(0, 30)})` : 'MISSING'}`);
-    this.logger.log(`[${phase}] certificate_pem: ${cert ? `present (${cert.length} chars, starts: ${cert.substring(0, 30)})` : 'MISSING'}`);
-  }
-
-  /**
    * Decrypt a credential's connectionData
    */
   private decryptCredential(credential: Credential): DecryptedCredential {
@@ -200,15 +190,11 @@ export class CredentialsService {
   ): Promise<DecryptedCredential> {
     const now = new Date();
 
-    this.logKeyPresence('create', createCredentialDto.connectionData);
-
     // Process connection data (e.g., extract certificate expiration)
     const processedConnectionData = this.processConnectionData(
       createCredentialDto.type,
       createCredentialDto.connectionData
     );
-
-    this.logKeyPresence('create (after process)', processedConnectionData);
 
     // Encrypt the connectionData before storing
     const encryptedData = this.encryptionService.encryptJson(processedConnectionData);
@@ -252,15 +238,11 @@ export class CredentialsService {
       updateData['status'] = updateCredentialDto.status;
     }
     if (updateCredentialDto.connectionData !== undefined) {
-      this.logKeyPresence('update (incoming)', updateCredentialDto.connectionData);
-
       // Process connection data (e.g., extract certificate expiration)
       const processedConnectionData = this.processConnectionData(
         credType,
         updateCredentialDto.connectionData
       );
-
-      this.logKeyPresence('update (after process)', processedConnectionData);
 
       updateData['connectionData'] = this.encryptionService.encryptJson(
         processedConnectionData
