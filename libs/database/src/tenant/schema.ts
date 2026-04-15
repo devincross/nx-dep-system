@@ -283,7 +283,7 @@ export const depTransactionStatusEnum = ['pending', 'in_progress', 'complete', '
 export type DepTransactionStatus = (typeof depTransactionStatusEnum)[number];
 
 // DEP order type enum
-export const depOrderTypeEnum = ['OR', 'RE', 'VD', 'OV'] as const;
+export const depOrderTypeEnum = ['OR', 'RE', 'VD', 'OV', 'SC'] as const;
 export type DepOrderType = (typeof depOrderTypeEnum)[number];
 
 // DEP transactions table - tracks every Apple DEP API interaction (required 3-7 year retention)

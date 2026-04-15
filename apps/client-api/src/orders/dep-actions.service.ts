@@ -160,7 +160,7 @@ export class DepActionsService {
     };
 
     const response = await this.callDep(cred, '/enroll-service/1.0/show-order-details', request);
-    await this.logTransaction(db, orderId, `QRY_${Date.now()}`, 'OR', request, response);
+    await this.logTransaction(db, orderId, `QRY_${Date.now()}`, 'SC', request, response);
     return { orderNumber, request, response };
   }
 
@@ -180,7 +180,7 @@ export class DepActionsService {
     };
 
     const response = await this.callDep(cred, '/enroll-service/1.0/show-order-details', request) as any;
-    await this.logTransaction(db, orderId, `CHK_${Date.now()}`, 'OR', request, response);
+    await this.logTransaction(db, orderId, `CHK_${Date.now()}`, 'SC', request, response);
 
     // Collect enrolled device serials from Apple's response
     const enrolledSerials = new Set<string>();

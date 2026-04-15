@@ -1,0 +1,1 @@
+ALTER TABLE `dep_transactions` MODIFY COLUMN `order_type` enum('OR','RE','VD','OV','SC') NOT NULL;

@@ -47,15 +47,7 @@ const itemHeaders = [
   { title: 'Actions', key: 'actions', sortable: false },
 ];
 
-const transactionHeaders = [
-  { title: 'Transaction ID', key: 'transactionId', sortable: true },
-  { title: 'Type', key: 'orderType', sortable: true },
-  { title: 'Status', key: 'status', sortable: true },
-  { title: 'Apple Transaction ID', key: 'deviceEnrollmentTransactionId', sortable: false },
-  { title: 'Error', key: 'errorMessage', sortable: false },
-  { title: 'Date', key: 'createdAt', sortable: true },
-  { title: '', key: 'expand', sortable: false, width: '50px' },
-];
+// Transaction headers kept for reference but using custom list layout now
 
 // Build a map of serial -> Apple DEP device data for comparison
 const appleDeviceMap = computed(() => {
@@ -94,7 +86,7 @@ function getStatusColor(status: OrderStatus | OrderItemDepStatus): string {
 }
 
 function getOrderTypeLabel(type: string): string {
-  const labels: Record<string, string> = { OR: 'Enroll', RE: 'Return', VD: 'Void', OV: 'Override' };
+  const labels: Record<string, string> = { OR: 'Enroll', RE: 'Return', VD: 'Void', OV: 'Override', SC: 'Status Check' };
   return labels[type] || type;
 }
 
@@ -401,54 +393,36 @@ onMounted(() => {
               <v-btn size="small" variant="outlined" :loading="depTransactionsLoading" @click="loadDepTransactions" prepend-icon="mdi-refresh">Refresh</v-btn>
             </v-card-title>
             <v-card-text>
-              <v-data-table
-                v-if="depTransactions.length > 0"
-                :headers="transactionHeaders"
-                :items="depTransactions"
-                density="compact"
-              >
-                <template v-slot:item.orderType="{ item }">
-                  <v-chip size="small" :color="item.orderType === 'OR' ? 'primary' : item.orderType === 'RE' ? 'warning' : 'grey'">
-                    {{ getOrderTypeLabel(item.orderType) }}
-                  </v-chip>
-                </template>
-                <template v-slot:item.status="{ item }">
-                  <v-chip :color="getStatusColor(item.status)" size="small">{{ item.status }}</v-chip>
-                </template>
-                <template v-slot:item.deviceEnrollmentTransactionId="{ item }">
-                  <span v-if="item.deviceEnrollmentTransactionId" class="text-caption">{{ item.deviceEnrollmentTransactionId }}</span>
-                  <span v-else class="text-grey">--</span>
-                </template>
-                <template v-slot:item.errorMessage="{ item }">
-                  <span v-if="item.errorMessage" class="text-error text-caption">{{ item.errorMessage }}</span>
-                  <span v-else class="text-grey">--</span>
-                </template>
-                <template v-slot:item.createdAt="{ item }">{{ new Date(item.createdAt).toLocaleString() }}</template>
-                <template v-slot:item.expand="{ item }">
-                  <v-btn icon size="small" variant="text" @click="toggleTransaction(item.id)">
-                    <v-icon>{{ expandedTransactions.includes(item.id) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-                  </v-btn>
-                </template>
-                <template v-slot:item.data-table-expand></template>
-                <template v-slot:bottom></template>
-              </v-data-table>
-
-              <!-- Expanded transaction details -->
-              <template v-for="txn in depTransactions" :key="'detail-' + txn.id">
-                <v-expand-transition>
-                  <div v-if="expandedTransactions.includes(txn.id)" class="pa-4" style="background: #f5f5f5; border-top: 1px solid #e0e0e0;">
-                    <v-row>
-                      <v-col cols="12" md="6">
-                        <div class="text-subtitle-2 mb-1">Request Payload</div>
-                        <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.requestPayload ? formatJson(txn.requestPayload) : 'No request data' }}</pre>
-                      </v-col>
-                      <v-col cols="12" md="6">
-                        <div class="text-subtitle-2 mb-1">Response Payload</div>
-                        <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.responsePayload ? formatJson(txn.responsePayload) : 'No response data' }}</pre>
-                      </v-col>
-                    </v-row>
+              <template v-if="depTransactions.length > 0">
+                <div v-for="txn in depTransactions" :key="txn.id" class="mb-1" style="border: 1px solid #e0e0e0; border-radius: 4px;">
+                  <!-- Transaction row -->
+                  <div class="d-flex align-center pa-3" style="cursor: pointer;" @click="toggleTransaction(txn.id)">
+                    <v-icon size="small" class="mr-2">{{ expandedTransactions.includes(txn.id) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+                    <v-chip size="small" class="mr-3" :color="txn.orderType === 'OR' ? 'primary' : txn.orderType === 'SC' ? 'info' : txn.orderType === 'RE' ? 'warning' : 'grey'">
+                      {{ getOrderTypeLabel(txn.orderType) }}
+                    </v-chip>
+                    <v-chip :color="getStatusColor(txn.status)" size="small" class="mr-3">{{ txn.status }}</v-chip>
+                    <span class="text-caption text-grey mr-3">{{ txn.transactionId }}</span>
+                    <v-spacer></v-spacer>
+                    <span v-if="txn.errorMessage" class="text-error text-caption mr-3">{{ txn.errorMessage }}</span>
+                    <span class="text-caption">{{ new Date(txn.createdAt).toLocaleString() }}</span>
                   </div>
-                </v-expand-transition>
+                  <!-- Expanded payload -->
+                  <v-expand-transition>
+                    <div v-if="expandedTransactions.includes(txn.id)" class="pa-4" style="background: #fafafa; border-top: 1px solid #e0e0e0;">
+                      <v-row>
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">Request Payload</div>
+                          <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.requestPayload ? formatJson(txn.requestPayload) : 'No request data' }}</pre>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <div class="text-subtitle-2 mb-1">Response Payload</div>
+                          <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.responsePayload ? formatJson(txn.responsePayload) : 'No response data' }}</pre>
+                        </v-col>
+                      </v-row>
+                    </div>
+                  </v-expand-transition>
+                </div>
               </template>
               <div v-else class="text-center text-grey pa-4">
                 No enrollment transactions recorded for this order yet.
