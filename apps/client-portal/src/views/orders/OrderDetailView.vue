@@ -31,6 +31,9 @@ const depDetails = ref<any>(null);
 const depDetailsError = ref('');
 const depTransactions = ref<any[]>([]);
 const depTransactionsLoading = ref(false);
+const checkStatusLoading = ref(false);
+const checkStatusResult = ref<any>(null);
+const expandedTransactions = ref<number[]>([]);
 
 const depStatuses: OrderItemDepStatus[] = ['pending', 'submitted', 'complete', 'error', 'changes'];
 
@@ -51,6 +54,7 @@ const transactionHeaders = [
   { title: 'Apple Transaction ID', key: 'deviceEnrollmentTransactionId', sortable: false },
   { title: 'Error', key: 'errorMessage', sortable: false },
   { title: 'Date', key: 'createdAt', sortable: true },
+  { title: '', key: 'expand', sortable: false, width: '50px' },
 ];
 
 // Build a map of serial -> Apple DEP device data for comparison
@@ -192,9 +196,37 @@ async function handleRestoreItem(item: OrderItem) {
   }
 }
 
+async function checkAndUpdateStatus() {
+  checkStatusLoading.value = true;
+  checkStatusResult.value = null;
+  try {
+    const response = await api.post(`/orders/${orderId.value}/dep/check-status`);
+    checkStatusResult.value = response.data;
+    // Reload order to reflect updated statuses
+    await loadOrder();
+    await loadDepTransactions();
+  } catch (err: any) {
+    error.value = err.response?.data?.message || 'Unable to check DEP status.';
+  } finally {
+    checkStatusLoading.value = false;
+  }
+}
+
+function toggleTransaction(id: number) {
+  const idx = expandedTransactions.value.indexOf(id);
+  if (idx >= 0) expandedTransactions.value.splice(idx, 1);
+  else expandedTransactions.value.push(id);
+}
+
+function formatJson(raw: string | object): string {
+  try {
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return JSON.stringify(obj, null, 2);
+  } catch { return String(raw); }
+}
+
 onMounted(() => {
   loadOrder();
-  loadDepDetails();
   loadDepTransactions();
 });
 </script>
@@ -237,9 +269,17 @@ onMounted(() => {
           <v-card>
             <v-card-title class="d-flex justify-space-between align-center">
               <div><v-icon start>mdi-apple</v-icon> Apple Enrollment Status</div>
-              <v-btn size="small" variant="outlined" :loading="depDetailsLoading" @click="loadDepDetails" prepend-icon="mdi-refresh">Refresh</v-btn>
+              <div>
+                <v-btn size="small" variant="outlined" :loading="depDetailsLoading" @click="loadDepDetails" prepend-icon="mdi-refresh" class="mr-2">Query Apple</v-btn>
+                <v-btn size="small" color="primary" :loading="checkStatusLoading" @click="checkAndUpdateStatus" prepend-icon="mdi-sync">Check &amp; Update Status</v-btn>
+              </div>
             </v-card-title>
             <v-card-text>
+              <v-alert v-if="checkStatusResult" :type="checkStatusResult.enrolledCount === checkStatusResult.depItemCount ? 'success' : 'info'" variant="tonal" density="compact" class="mb-3" closable @click:close="checkStatusResult = null">
+                {{ checkStatusResult.enrolledCount }}/{{ checkStatusResult.depItemCount }} devices enrolled.
+                Status: {{ checkStatusResult.previousStatus }} &rarr; {{ checkStatusResult.newStatus }}
+              </v-alert>
+
               <v-progress-linear v-if="depDetailsLoading" indeterminate color="primary" class="mb-3"></v-progress-linear>
 
               <v-alert v-if="depDetailsError" type="warning" variant="tonal" density="compact" class="mb-3">
@@ -384,7 +424,32 @@ onMounted(() => {
                   <span v-else class="text-grey">--</span>
                 </template>
                 <template v-slot:item.createdAt="{ item }">{{ new Date(item.createdAt).toLocaleString() }}</template>
+                <template v-slot:item.expand="{ item }">
+                  <v-btn icon size="small" variant="text" @click="toggleTransaction(item.id)">
+                    <v-icon>{{ expandedTransactions.includes(item.id) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                  </v-btn>
+                </template>
+                <template v-slot:item.data-table-expand></template>
+                <template v-slot:bottom></template>
               </v-data-table>
+
+              <!-- Expanded transaction details -->
+              <template v-for="txn in depTransactions" :key="'detail-' + txn.id">
+                <v-expand-transition>
+                  <div v-if="expandedTransactions.includes(txn.id)" class="pa-4" style="background: #f5f5f5; border-top: 1px solid #e0e0e0;">
+                    <v-row>
+                      <v-col cols="12" md="6">
+                        <div class="text-subtitle-2 mb-1">Request Payload</div>
+                        <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.requestPayload ? formatJson(txn.requestPayload) : 'No request data' }}</pre>
+                      </v-col>
+                      <v-col cols="12" md="6">
+                        <div class="text-subtitle-2 mb-1">Response Payload</div>
+                        <pre class="text-caption pa-2" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ txn.responsePayload ? formatJson(txn.responsePayload) : 'No response data' }}</pre>
+                      </v-col>
+                    </v-row>
+                  </div>
+                </v-expand-transition>
+              </template>
               <div v-else class="text-center text-grey pa-4">
                 No enrollment transactions recorded for this order yet.
               </div>
