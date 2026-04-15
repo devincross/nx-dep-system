@@ -97,19 +97,22 @@ export class NetsuiteOAuthService {
   private createClientAssertion(config: NetsuiteOAuthConfig): string {
     const now = Math.floor(Date.now() / 1000);
     const tokenUrl = this.getTokenUrl(config.accountId);
-    
+
     const payload = {
       iss: config.clientId,
-      sub: config.clientId,
+      scope: 'restlets rest_webservices',
       aud: tokenUrl,
       iat: now,
       exp: now + 300, // 5 minutes expiry for the assertion
-      scope: 'restlets rest_webservices',
     };
 
     // Sign the JWT with the private key
     const privateKey = this.normalizePrivateKey(config.privateKey);
-    
+
+    this.logger.debug(`JWT header: kid=${config.certificateId}, alg=RS256`);
+    this.logger.debug(`JWT payload: iss=${config.clientId}, aud=${tokenUrl}, scope=${payload.scope}`);
+    this.logger.debug(`Private key starts with: ${privateKey.substring(0, 40)}...`);
+
     const token = jwt.sign(payload, privateKey, {
       algorithm: 'RS256',
       header: {
