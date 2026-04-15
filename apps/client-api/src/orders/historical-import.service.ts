@@ -370,7 +370,7 @@ export class HistoricalImportService {
       isDep: products.some((p) => Boolean(p['is_dep'])),
       po: raw['po'] ? String(raw['po']) : undefined,
       source: 'byu',
-      depOrderId: String(raw['order_id'] ?? ''),
+      depOrderId: raw['order_id'] ? `NS${raw['order_id']}` : '',
       depOrderedAt: raw['date_created']
         ? new Date(String(raw['date_created']))
         : undefined,

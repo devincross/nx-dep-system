@@ -13,8 +13,8 @@ import {
 import { TenantService } from './tenant.service.js';
 import { CreateTenantDto, UpdateTenantDto } from './dto/index.js';
 import { DomainService } from '../domain/domain.service.js';
-import { migrateLandlordDb, migrateTenantDb, getLandlordDb, tenants, domains, getTenantConnection, orderItems } from '@org/database';
-import { sql, like, eq, and, isNull } from 'drizzle-orm';
+import { migrateLandlordDb, migrateTenantDb, getLandlordDb, tenants, domains, getTenantConnection, orderItems, orders } from '@org/database';
+import { sql, like, eq, and, isNull, isNotNull, notLike } from 'drizzle-orm';
 
 @Controller('tenants')
 export class TenantController {
@@ -201,6 +201,97 @@ export class TenantController {
 
     const totalUpdated = results.reduce((sum, r) => sum + r.updated, 0);
     this.logger.log(`Serial normalization complete: ${totalUpdated} total serials updated across ${tenantMap.size} tenants`);
+
+    return { totalTenants: tenantMap.size, totalUpdated, results };
+  }
+
+  /**
+   * One-time cleanup: prepend 'NS' to dep_order_id for BYU tenant orders
+   * that don't already have the prefix.
+   */
+  @Post('normalize-dep-order-ids')
+  async normalizeDepOrderIds() {
+    this.logger.log('Starting dep_order_id normalization (NS prefix)...');
+    const db = getLandlordDb();
+
+    const rows = await db
+      .select({
+        tenantId: tenants.id,
+        slug: tenants.slug,
+        dbHost: domains.dbHost,
+        dbPort: domains.dbPort,
+        dbName: domains.dbName,
+        dbUser: domains.dbUser,
+        dbPassword: domains.dbPassword,
+        isPrimary: domains.isPrimary,
+        domain: domains.domain,
+      })
+      .from(tenants)
+      .innerJoin(domains, sql`${tenants.id} = ${domains.tenantId}`)
+      .where(like(tenants.slug, '%byu%'));
+
+    // Pick primary domain per tenant
+    const tenantMap = new Map<string, { slug: string; domain: string; dbHost: string; dbPort: number; dbName: string; dbUser: string; dbPassword: string }>();
+    for (const row of rows) {
+      const existing = tenantMap.get(row.tenantId);
+      if (!existing || row.isPrimary) {
+        tenantMap.set(row.tenantId, {
+          slug: row.slug,
+          domain: row.domain,
+          dbHost: row.dbHost,
+          dbPort: row.dbPort,
+          dbName: row.dbName,
+          dbUser: row.dbUser,
+          dbPassword: row.dbPassword,
+        });
+      }
+    }
+
+    if (tenantMap.size === 0) {
+      return { message: 'No BYU tenants found', totalUpdated: 0 };
+    }
+
+    const results: { tenant: string; success: boolean; updated: number; found: number; message: string }[] = [];
+
+    for (const [, tenant] of tenantMap) {
+      try {
+        const tenantDb = await getTenantConnection(tenant.domain, {
+          host: tenant.dbHost,
+          port: tenant.dbPort,
+          database: tenant.dbName,
+          user: tenant.dbUser,
+          password: tenant.dbPassword,
+        });
+
+        // Find orders with dep_order_id set but missing NS prefix
+        const orderRows = await tenantDb
+          .select({ id: orders.id, depOrderId: orders.depOrderId })
+          .from(orders)
+          .where(and(
+            isNotNull(orders.depOrderId),
+            notLike(orders.depOrderId, 'NS%'),
+          ));
+
+        let updated = 0;
+        for (const order of orderRows) {
+          if (!order.depOrderId) continue;
+          await tenantDb.update(orders)
+            .set({ depOrderId: `NS${order.depOrderId}`, updatedAt: new Date() })
+            .where(eq(orders.id, order.id));
+          updated++;
+        }
+
+        results.push({ tenant: tenant.slug, success: true, updated, found: orderRows.length, message: `${updated} updated out of ${orderRows.length} found` });
+        this.logger.log(`[${tenant.slug}] dep_order_id normalization: ${updated}/${orderRows.length}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results.push({ tenant: tenant.slug, success: false, updated: 0, found: 0, message });
+        this.logger.error(`[${tenant.slug}] dep_order_id normalization failed: ${message}`);
+      }
+    }
+
+    const totalUpdated = results.reduce((sum, r) => sum + r.updated, 0);
+    this.logger.log(`dep_order_id normalization complete: ${totalUpdated} total updated`);
 
     return { totalTenants: tenantMap.size, totalUpdated, results };
   }
