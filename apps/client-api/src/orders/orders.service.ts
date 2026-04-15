@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException, ConflictException, Logger } from '@nestjs/common';
-import { eq, isNull, and, inArray, like, sql } from 'drizzle-orm';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { eq, isNull, and, inArray } from 'drizzle-orm';
 import { TenantDb, orders, orderItems, Order, OrderItem } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
@@ -15,7 +15,6 @@ export interface OrderWithItems extends Order {
 
 @Injectable()
 export class OrdersService {
-  private readonly logger = new Logger(OrdersService.name);
   /**
    * Check if serial numbers already exist in non-deleted order items
    * @throws ConflictException if any serial number already exists
@@ -338,42 +337,5 @@ export class OrdersService {
       .where(eq(orderItems.id, itemId));
 
     return restored[0];
-  }
-
-  /**
-   * Strip leading 'S' from all serial numbers in order_items.
-   * Returns the count of updated rows.
-   */
-  async normalizeSerialNumbers(db: TenantDb): Promise<{ updated: number }> {
-    const rows = await db
-      .select({ id: orderItems.id, serialNumber: orderItems.serialNumber })
-      .from(orderItems)
-      .where(like(orderItems.serialNumber, 'S%'));
-
-    let updated = 0;
-    for (const row of rows) {
-      const normalized = row.serialNumber.slice(1); // strip leading S
-      if (!normalized) continue;
-
-      // Check for conflicts before updating
-      const conflict = await db
-        .select({ id: orderItems.id })
-        .from(orderItems)
-        .where(and(eq(orderItems.serialNumber, normalized), isNull(orderItems.deletedAt)))
-        .limit(1);
-
-      if (conflict.length > 0) {
-        this.logger.warn(`Skipping ${row.serialNumber} → ${normalized}: serial already exists (item #${conflict[0].id})`);
-        continue;
-      }
-
-      await db.update(orderItems)
-        .set({ serialNumber: normalized, updatedAt: new Date() })
-        .where(eq(orderItems.id, row.id));
-      updated++;
-    }
-
-    this.logger.log(`Serial number normalization: ${updated} updated out of ${rows.length} found with S prefix`);
-    return { updated };
   }
 }

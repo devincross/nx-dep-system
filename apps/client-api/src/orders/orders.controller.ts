@@ -120,13 +120,5 @@ export class OrdersController {
   ) {
     return this.ordersService.restoreOrderItem(tenant.db, orderId, itemId);
   }
-
-  /**
-   * One-time cleanup: strip leading 'S' from all existing serial numbers.
-   */
-  @Post('normalize-serials')
-  async normalizeSerials(@CurrentTenant() tenant: TenantContext) {
-    return this.ordersService.normalizeSerialNumbers(tenant.db);
-  }
 }
 
