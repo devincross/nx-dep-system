@@ -106,6 +106,19 @@ export class DepActionsController {
   }
 
   /**
+   * Check DEP enrollment status from Apple and update order/item statuses.
+   * Queries Apple for enrolled devices and marks matching items as complete.
+   * If all DEP items are enrolled, marks the order as complete.
+   */
+  @Post(':id/dep/check-status')
+  async checkAndUpdateStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.depActionsService.checkAndUpdateDepStatus(tenant.db, id);
+  }
+
+  /**
    * Reconcile orders across our DB, DEP, and ERP.
    * Returns side-by-side comparison for each order.
    */

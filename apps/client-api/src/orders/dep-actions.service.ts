@@ -51,6 +51,20 @@ export class DepActionsService {
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
     await this.logTransaction(db, orderId, txnId, 'OR', request, response);
+
+    // Update order and item statuses after successful enrollment submission
+    const resp = response as any;
+    if (resp.deviceEnrollmentTransactionId) {
+      await db.update(orders)
+        .set({ status: 'submitted', updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+      for (const item of depItems) {
+        await db.update(orderItems)
+          .set({ depStatus: 'submitted', updatedAt: new Date() })
+          .where(eq(orderItems.id, item.id));
+      }
+    }
+
     return { transactionId: txnId, response };
   }
 
@@ -147,6 +161,81 @@ export class DepActionsService {
 
     const response = await this.callDep(cred, '/enroll-service/1.0/show-order-details', request);
     return { orderNumber, request, response };
+  }
+
+  /**
+   * Check DEP enrollment status from Apple and update order/item statuses.
+   * Calls show-order-details, matches devices to our items, and updates
+   * depStatus on each item. If all DEP items are enrolled, marks the order complete.
+   */
+  async checkAndUpdateDepStatus(db: TenantDb, orderId: number) {
+    const { order, items, cred } = await this.loadOrderAndCreds(db, orderId);
+    const orderNumber = order.depOrderId || order.externalOrderId || String(order.id);
+
+    const request = {
+      requestContext: { shipTo: cred.shipTo, timeZone: '420', langCode: 'en' },
+      depResellerId: cred.depResellerId,
+      orderNumbers: [orderNumber],
+    };
+
+    const response = await this.callDep(cred, '/enroll-service/1.0/show-order-details', request) as any;
+
+    // Collect enrolled device serials from Apple's response
+    const enrolledSerials = new Set<string>();
+    for (const depOrder of response.orders ?? []) {
+      for (const delivery of depOrder.deliveries ?? []) {
+        for (const device of delivery.devices ?? []) {
+          if (device.deviceId) {
+            enrolledSerials.add(device.deviceId);
+          }
+        }
+      }
+    }
+
+    this.logger.log(`[checkAndUpdateDepStatus] Order ${orderId}: Apple reports ${enrolledSerials.size} enrolled devices`);
+
+    // Update each DEP item's status
+    const depItems = items.filter((i) => i.isDep && !i.deletedAt);
+    let completedCount = 0;
+
+    for (const item of depItems) {
+      const isEnrolled = enrolledSerials.has(item.serialNumber);
+      const newStatus = isEnrolled ? 'complete' : item.depStatus;
+
+      if (newStatus !== item.depStatus) {
+        await db.update(orderItems)
+          .set({ depStatus: newStatus, updatedAt: new Date() })
+          .where(eq(orderItems.id, item.id));
+      }
+
+      if (isEnrolled) completedCount++;
+    }
+
+    // Update order status based on item completion
+    let newOrderStatus = order.status;
+    if (depItems.length > 0 && completedCount === depItems.length) {
+      newOrderStatus = 'complete';
+    } else if (completedCount > 0) {
+      newOrderStatus = 'submitted';
+    }
+
+    if (newOrderStatus !== order.status) {
+      await db.update(orders)
+        .set({ status: newOrderStatus, updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+    }
+
+    this.logger.log(`[checkAndUpdateDepStatus] Order ${orderId}: ${completedCount}/${depItems.length} enrolled, status: ${order.status} → ${newOrderStatus}`);
+
+    return {
+      orderId,
+      orderNumber,
+      depItemCount: depItems.length,
+      enrolledCount: completedCount,
+      previousStatus: order.status,
+      newStatus: newOrderStatus,
+      enrolledSerials: [...enrolledSerials],
+    };
   }
 
   /**
