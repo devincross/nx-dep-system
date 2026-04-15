@@ -104,7 +104,7 @@ export class NetsuiteOAuthService {
       aud: tokenUrl,
       iat: now,
       exp: now + 300, // 5 minutes expiry for the assertion
-      scope: ['restlets', 'rest_webservices'],
+      scope: 'restlets rest_webservices',
     };
 
     // Sign the JWT with the private key
