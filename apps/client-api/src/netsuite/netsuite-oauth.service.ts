@@ -100,7 +100,7 @@ export class NetsuiteOAuthService {
 
     const payload = {
       iss: config.clientId,
-      scope: 'restlets rest_webservices',
+      scope: 'restlets',
       aud: tokenUrl,
       iat: now,
       exp: now + 300, // 5 minutes expiry for the assertion
