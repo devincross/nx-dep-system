@@ -47,8 +47,14 @@ test-output
 .env
 .env.local
 .env.*.local
+.env.netsuite-*
+!.env.netsuite-*.example
 
 # Docker
 .env.docker
+
+# NetSuite credentials exported for local debugging
+netsuite_private.pem
+netsuite_public.pem
 
 vite.config.*.timestamp*
