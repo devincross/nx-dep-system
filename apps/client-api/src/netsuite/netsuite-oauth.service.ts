@@ -108,14 +108,14 @@ export class NetsuiteOAuthService {
     // Sign the JWT with the private key
     const privateKey = this.normalizePrivateKey(config.privateKey);
 
-    this.logger.debug(`JWT header: kid=${config.certificateId}, alg=RS256`);
+    this.logger.debug(`JWT header: kid=${config.certificateId}, alg=PS256`);
     this.logger.debug(`JWT payload: iss=${config.clientId}, aud=${tokenUrl}, scope=${payload.scope}`);
     this.logger.debug(`Private key starts with: ${privateKey.substring(0, 40)}...`);
 
     const token = jwt.sign(payload, privateKey, {
-      algorithm: 'RS256',
+      algorithm: 'PS256',
       header: {
-        alg: 'RS256',
+        alg: 'PS256',
         typ: 'JWT',
         kid: config.certificateId,
       },

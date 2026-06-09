@@ -187,16 +187,15 @@ export class NetsuiteAdapter implements DataSourcePort {
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: this.config!.clientId,
-      sub: this.config!.clientId,
       aud: this.getTokenUrl(),
       iat: now,
       exp: now + 300,
-      scope: ['restlets', 'rest_webservices'],
+      scope: 'restlets',
     };
 
     return jwt.sign(payload, this.config!.privateKey!, {
-      algorithm: 'RS256',
-      header: { alg: 'RS256', typ: 'JWT', kid: this.config!.certificateId },
+      algorithm: 'PS256',
+      header: { alg: 'PS256', typ: 'JWT', kid: this.config!.certificateId },
     });
   }
 
