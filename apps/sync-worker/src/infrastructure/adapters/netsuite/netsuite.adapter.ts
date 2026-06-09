@@ -47,15 +47,12 @@ export class NetsuiteAdapter implements DataSourcePort {
 
   async fetchAccounts(options?: FetchOptions): Promise<FetchResult<RawAccountData>> {
     this.ensureConfigured();
-    
+
     const params: Record<string, string> = {
       type: 'customers',
       realm: this.config!.account,
+      last_modified: (options?.lastModified ?? new Date(0)).toISOString().split('T')[0],
     };
-
-    if (options?.lastModified) {
-      params['last_modified'] = options.lastModified.toISOString().split('T')[0];
-    }
 
     const response = await this.makeRequest('GET', this.config!.accountScriptId, params);
     
@@ -70,15 +67,12 @@ export class NetsuiteAdapter implements DataSourcePort {
 
   async fetchOrders(options?: FetchOptions): Promise<FetchResult<RawOrderData>> {
     this.ensureConfigured();
-    
+
     const params: Record<string, string> = {
       type: 'orders',
       realm: this.config!.account,
+      last_modified: (options?.lastModified ?? new Date(0)).toISOString().split('T')[0],
     };
-
-    if (options?.lastModified) {
-      params['last_modified'] = options.lastModified.toISOString().split('T')[0];
-    }
 
     const response = await this.makeRequest('GET', this.config!.orderScriptId, params);
     

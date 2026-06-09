@@ -15,6 +15,8 @@ const activeTab = ref('status');
 // Orders and Accounts data
 const ordersResponse = ref<NetsuiteResponse | null>(null);
 const accountsResponse = ref<NetsuiteResponse | null>(null);
+const ordersLastModified = ref('');
+const accountsLastModified = ref('');
 
 // Generic RESTlet call
 const restletScriptId = ref('');
@@ -51,7 +53,8 @@ async function fetchOrders() {
   loading.value = true;
   error.value = '';
   try {
-    ordersResponse.value = await netsuiteStore.getOrders();
+    const query = ordersLastModified.value ? { last_modified: ordersLastModified.value } : undefined;
+    ordersResponse.value = await netsuiteStore.getOrders(query);
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to retrieve orders from NetSuite. Please check your connection and try again.';
   } finally {
@@ -63,7 +66,8 @@ async function fetchAccounts() {
   loading.value = true;
   error.value = '';
   try {
-    accountsResponse.value = await netsuiteStore.getAccounts();
+    const query = accountsLastModified.value ? { last_modified: accountsLastModified.value } : undefined;
+    accountsResponse.value = await netsuiteStore.getAccounts(query);
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to retrieve accounts from NetSuite. Please check your connection and try again.';
   } finally {
@@ -130,11 +134,49 @@ onMounted(() => { loadStatus(); });
       </v-tabs-window-item>
       <!-- Orders Tab -->
       <v-tabs-window-item value="orders">
-        <v-card class="mt-4"><v-card-title>NetSuite Orders</v-card-title><v-card-actions><v-btn color="primary" :loading="loading" @click="fetchOrders" prepend-icon="mdi-download">Fetch Orders</v-btn></v-card-actions><v-card-text v-if="ordersResponse"><v-alert :type="ordersResponse.success ? 'success' : 'error'" class="mb-4">{{ ordersResponse.success ? 'Success' : ordersResponse.error }}</v-alert><pre v-if="ordersResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(ordersResponse.data, null, 2) }}</pre></v-card-text></v-card>
+        <v-card class="mt-4">
+          <v-card-title>NetSuite Orders</v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="ordersLastModified"
+              type="date"
+              label="Last Modified (since)"
+              hint="Leave blank to fetch all orders"
+              persistent-hint
+              clearable
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-btn color="primary" :loading="loading" @click="fetchOrders" prepend-icon="mdi-download">Fetch Orders</v-btn>
+          </v-card-actions>
+          <v-card-text v-if="ordersResponse">
+            <v-alert :type="ordersResponse.success ? 'success' : 'error'" class="mb-4">{{ ordersResponse.success ? 'Success' : ordersResponse.error }}</v-alert>
+            <pre v-if="ordersResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(ordersResponse.data, null, 2) }}</pre>
+          </v-card-text>
+        </v-card>
       </v-tabs-window-item>
       <!-- Accounts Tab -->
       <v-tabs-window-item value="accounts">
-        <v-card class="mt-4"><v-card-title>NetSuite Accounts</v-card-title><v-card-actions><v-btn color="primary" :loading="loading" @click="fetchAccounts" prepend-icon="mdi-download">Fetch Accounts</v-btn></v-card-actions><v-card-text v-if="accountsResponse"><v-alert :type="accountsResponse.success ? 'success' : 'error'" class="mb-4">{{ accountsResponse.success ? 'Success' : accountsResponse.error }}</v-alert><pre v-if="accountsResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(accountsResponse.data, null, 2) }}</pre></v-card-text></v-card>
+        <v-card class="mt-4">
+          <v-card-title>NetSuite Accounts</v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="accountsLastModified"
+              type="date"
+              label="Last Modified (since)"
+              hint="Leave blank to fetch all accounts"
+              persistent-hint
+              clearable
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-btn color="primary" :loading="loading" @click="fetchAccounts" prepend-icon="mdi-download">Fetch Accounts</v-btn>
+          </v-card-actions>
+          <v-card-text v-if="accountsResponse">
+            <v-alert :type="accountsResponse.success ? 'success' : 'error'" class="mb-4">{{ accountsResponse.success ? 'Success' : accountsResponse.error }}</v-alert>
+            <pre v-if="accountsResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(accountsResponse.data, null, 2) }}</pre>
+          </v-card-text>
+        </v-card>
       </v-tabs-window-item>
       <!-- Generic RESTlet Tab -->
       <v-tabs-window-item value="restlet">
