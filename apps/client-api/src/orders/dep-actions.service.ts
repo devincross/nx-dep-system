@@ -240,6 +240,115 @@ export class DepActionsService {
   }
 
   /**
+   * Check the status of the most recent in-flight DEP transaction for an order.
+   * Calls Apple's check-transaction-status endpoint, which is the only way to
+   * see per-device errors after Apple's async ingest of an enroll/return/void.
+   * Same call the cron makes, but on-demand.
+   */
+  async checkTransactionStatus(db: TenantDb, orderId: number) {
+    const { cred } = await this.loadOrderAndCreds(db, orderId);
+
+    // Pick the most recent transaction for this order that has an Apple ID
+    // and isn't already in a terminal state.
+    const candidates = await db
+      .select()
+      .from(depTransactions)
+      .where(
+        and(
+          eq(depTransactions.orderId, orderId),
+          inArray(depTransactions.status, ['pending', 'in_progress'] as const),
+        ),
+      );
+
+    const txn = candidates
+      .filter((t) => !!t.deviceEnrollmentTransactionId)
+      .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))[0];
+
+    if (!txn) {
+      throw new BadRequestException(
+        'No in-flight DEP transaction with a deviceEnrollmentTransactionId on this order',
+      );
+    }
+
+    const request = {
+      requestContext: { shipTo: cred.shipTo, timeZone: '420', langCode: 'en' },
+      depResellerId: cred.depResellerId,
+      deviceEnrollmentTransactionId: txn.deviceEnrollmentTransactionId,
+    };
+
+    const response = await this.callDep(
+      cred,
+      '/enroll-service/1.0/check-transaction-status',
+      request,
+    ) as any;
+
+    // Mirror the cron's status mapping
+    let status: 'pending' | 'in_progress' | 'complete' | 'error';
+    let errorCode: string | null = null;
+    let errorMessage: string | null = null;
+    let completedAt: Date | null = null;
+
+    if (response.statusCode === 'COMPLETE') {
+      status = 'complete';
+      completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
+    } else if (response.statusCode === 'ERROR') {
+      status = 'error';
+      errorMessage = this.extractDeviceErrors(response);
+      completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
+    } else if (Array.isArray(response.checkTransactionErrorResponse) && response.checkTransactionErrorResponse.length > 0) {
+      const errors = response.checkTransactionErrorResponse;
+      const inProgress = errors.some((e: { errorCode?: string }) => e.errorCode === 'DEP-ERR-4003');
+      if (inProgress) {
+        status = 'in_progress';
+      } else {
+        status = 'error';
+        errorCode = errors[0].errorCode ?? null;
+        errorMessage = errors
+          .map((e: { errorCode?: string; errorMessage?: string }) => `${e.errorCode}: ${e.errorMessage}`)
+          .join('; ');
+      }
+    } else {
+      status = 'in_progress';
+    }
+
+    await db.update(depTransactions)
+      .set({
+        status,
+        responsePayload: JSON.stringify(response),
+        errorCode: errorCode ?? undefined,
+        errorMessage: errorMessage ?? undefined,
+        completedAt: completedAt ?? undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(depTransactions.id, txn.id));
+
+    return {
+      transactionId: txn.transactionId,
+      deviceEnrollmentTransactionId: txn.deviceEnrollmentTransactionId,
+      status,
+      errorCode,
+      errorMessage,
+      response,
+    };
+  }
+
+  private extractDeviceErrors(response: any): string {
+    const messages: string[] = [];
+    for (const order of response.orders ?? []) {
+      for (const delivery of order.deliveries ?? []) {
+        for (const device of delivery.devices ?? []) {
+          if (device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
+            messages.push(
+              `${device.deviceId}: ${device.devicePostStatus} - ${device.devicePostStatusMessage || ''}`,
+            );
+          }
+        }
+      }
+    }
+    return messages.join('; ') || 'Unknown error';
+  }
+
+  /**
    * Reconcile: compare our DB, Apple DEP, and ERP data side by side
    */
   async reconcileOrders(tenant: TenantContext, orderIds?: number[]) {

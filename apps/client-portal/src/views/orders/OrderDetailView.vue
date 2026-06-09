@@ -33,6 +33,9 @@ const depTransactions = ref<any[]>([]);
 const depTransactionsLoading = ref(false);
 const checkStatusLoading = ref(false);
 const checkStatusResult = ref<any>(null);
+const checkTxnStatusLoading = ref(false);
+const checkTxnStatusResult = ref<any>(null);
+const checkTxnStatusError = ref('');
 const expandedTransactions = ref<number[]>([]);
 
 const depStatuses: OrderItemDepStatus[] = ['pending', 'submitted', 'complete', 'error', 'changes'];
@@ -204,6 +207,21 @@ async function checkAndUpdateStatus() {
   }
 }
 
+async function checkTransactionStatus() {
+  checkTxnStatusLoading.value = true;
+  checkTxnStatusResult.value = null;
+  checkTxnStatusError.value = '';
+  try {
+    const response = await api.post(`/orders/${orderId.value}/dep/check-transaction-status`);
+    checkTxnStatusResult.value = response.data;
+    await loadDepTransactions();
+  } catch (err: any) {
+    checkTxnStatusError.value = err.response?.data?.message || 'Unable to check transaction status.';
+  } finally {
+    checkTxnStatusLoading.value = false;
+  }
+}
+
 function toggleTransaction(id: number) {
   const idx = expandedTransactions.value.indexOf(id);
   if (idx >= 0) expandedTransactions.value.splice(idx, 1);
@@ -263,13 +281,29 @@ onMounted(() => {
               <div><v-icon start>mdi-apple</v-icon> Apple Enrollment Status</div>
               <div>
                 <v-btn size="small" variant="outlined" :loading="depDetailsLoading" @click="loadDepDetails" prepend-icon="mdi-refresh" class="mr-2">Query Apple</v-btn>
-                <v-btn size="small" color="primary" :loading="checkStatusLoading" @click="checkAndUpdateStatus" prepend-icon="mdi-sync">Check &amp; Update Status</v-btn>
+                <v-btn size="small" color="primary" :loading="checkStatusLoading" @click="checkAndUpdateStatus" prepend-icon="mdi-sync" class="mr-2">Check &amp; Update Status</v-btn>
+                <v-btn size="small" color="secondary" :loading="checkTxnStatusLoading" @click="checkTransactionStatus" prepend-icon="mdi-magnify">Check Transaction Result</v-btn>
               </div>
             </v-card-title>
             <v-card-text>
               <v-alert v-if="checkStatusResult" :type="checkStatusResult.enrolledCount === checkStatusResult.depItemCount ? 'success' : 'info'" variant="tonal" density="compact" class="mb-3" closable @click:close="checkStatusResult = null">
                 {{ checkStatusResult.enrolledCount }}/{{ checkStatusResult.depItemCount }} devices enrolled.
                 Status: {{ checkStatusResult.previousStatus }} &rarr; {{ checkStatusResult.newStatus }}
+              </v-alert>
+
+              <v-alert
+                v-if="checkTxnStatusResult"
+                :type="checkTxnStatusResult.status === 'complete' ? 'success' : (checkTxnStatusResult.status === 'error' ? 'error' : 'info')"
+                variant="tonal" density="compact" class="mb-3" closable
+                @click:close="checkTxnStatusResult = null"
+              >
+                <div><strong>Transaction status:</strong> {{ checkTxnStatusResult.status }}</div>
+                <div v-if="checkTxnStatusResult.errorCode"><strong>{{ checkTxnStatusResult.errorCode }}:</strong> {{ checkTxnStatusResult.errorMessage }}</div>
+                <div v-else-if="checkTxnStatusResult.errorMessage">{{ checkTxnStatusResult.errorMessage }}</div>
+              </v-alert>
+
+              <v-alert v-if="checkTxnStatusError" type="warning" variant="tonal" density="compact" class="mb-3" closable @click:close="checkTxnStatusError = ''">
+                {{ checkTxnStatusError }}
               </v-alert>
 
               <v-progress-linear v-if="depDetailsLoading" indeterminate color="primary" class="mb-3"></v-progress-linear>

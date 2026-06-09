@@ -115,6 +115,19 @@ export class DepActionsController {
   }
 
   /**
+   * Check the status of the most recent in-flight DEP transaction for this order.
+   * Calls Apple's check-transaction-status with deviceEnrollmentTransactionId —
+   * the only way to see per-device errors after an async ingest.
+   */
+  @Post(':id/dep/check-transaction-status')
+  async checkTransactionStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.depActionsService.checkTransactionStatus(tenant.db, id);
+  }
+
+  /**
    * Reconcile orders across our DB, DEP, and ERP.
    * Returns side-by-side comparison for each order.
    */
