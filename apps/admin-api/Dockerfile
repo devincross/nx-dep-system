@@ -9,7 +9,7 @@ COPY apps/admin-api/package.json ./apps/admin-api/
 COPY libs/database/package.json ./libs/database/
 
 # Install pnpm and dependencies
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+RUN npm install -g pnpm@9 && pnpm install --frozen-lockfile
 
 # Copy all source code needed for build
 COPY apps/admin-api/ ./apps/admin-api/
