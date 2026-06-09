@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { CredentialsService } from './credentials.service';
 import { EncryptionService } from '../encryption/encryption.service';
+import { CertificateParserService } from './certificate-parser.service';
 
 // Mock the database module
 jest.mock('@org/database', () => ({
@@ -68,6 +69,10 @@ describe('CredentialsService', () => {
         {
           provide: EncryptionService,
           useValue: mockEncryptionService,
+        },
+        {
+          provide: CertificateParserService,
+          useValue: { parsePem: jest.fn() },
         },
       ],
     }).compile();

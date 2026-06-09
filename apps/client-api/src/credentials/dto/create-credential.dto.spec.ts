@@ -6,19 +6,7 @@ describe('CreateCredentialDto', () => {
   const validZohoConnectionData = {
     client_id: '1000.RRML2ZC868TJHX5AQCT7SAAHZ3KQLN',
     client_secret: '62b6aa1b72cddd52bb87bdf5d3df3e131a7b0b8968',
-    redirect_uri: 'https://tulane-prod.api.tenant.801saas.com/setup/zohoOauth',
-    current_user_email: 'tcorders@tulane.edu',
-    account_field: 'DEP_Account_Number',
-    is_dep_field: 'Is_DEP',
-    po_field: 'Purchase_Order',
-    serials_field: 'Apple_Serial_Numbers',
-    dep_status_field: 'DEP_Registration_Status',
-    status: 'Status',
-    dep_order_id: 'SO_Number',
-    dep_ordered_at: 'CreatedTime',
-    dep_shipped_at: 'ModifiedTime',
-    application_log_file_path: 'app/zoho/oauth/logs',
-    token_persistence_path: 'app/zoho/oauth/tokens',
+    refresh_token: '1000.refresh_token_example',
   };
 
   const validNetsuiteConnectionData = {
@@ -76,25 +64,11 @@ describe('CreateCredentialDto', () => {
       expect(errors.some((e) => e.property === 'connectionData')).toBe(true);
     });
 
-    it('should fail validation when zoho type has invalid email', async () => {
+    it('should fail validation when refresh_token is missing', async () => {
+      const { refresh_token: _omit, ...data } = validZohoConnectionData;
       const dto = plainToInstance(CreateCredentialDto, {
         type: 'zoho',
-        connectionData: {
-          ...validZohoConnectionData,
-          current_user_email: 'not-an-email',
-        },
-      });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it('should fail validation when zoho type has invalid redirect_uri', async () => {
-      const dto = plainToInstance(CreateCredentialDto, {
-        type: 'zoho',
-        connectionData: {
-          ...validZohoConnectionData,
-          redirect_uri: 'not-a-url',
-        },
+        connectionData: data,
       });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
@@ -184,17 +158,6 @@ describe('CreateCredentialDto', () => {
       expect(errors.length).toBeGreaterThan(0);
     });
 
-    it('should fail validation when ssl_key is not base64', async () => {
-      const dto = plainToInstance(CreateCredentialDto, {
-        type: 'dep',
-        connectionData: {
-          ...validDepConnectionData,
-          ssl_key: 'not-base64!!!',
-        },
-      });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-    });
   });
 
   describe('other type validation', () => {

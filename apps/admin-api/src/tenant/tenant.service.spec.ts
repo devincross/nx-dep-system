@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { TenantService } from './tenant.service';
+import { DatabaseProvisioningService } from '../domain/database-provisioning.service';
 
 // Mock the database module
 jest.mock('@org/database', () => ({
   getLandlordDb: jest.fn(),
   tenants: { id: 'id', slug: 'slug', name: 'name' },
+  domains: { id: 'id', domain: 'domain', tenantId: 'tenantId' },
 }));
 
 import { getLandlordDb } from '@org/database';
@@ -40,7 +42,13 @@ describe('TenantService', () => {
     (getLandlordDb as jest.Mock).mockReturnValue(mockDb);
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TenantService],
+      providers: [
+        TenantService,
+        {
+          provide: DatabaseProvisioningService,
+          useValue: { provisionDatabase: jest.fn(), runMigrations: jest.fn() },
+        },
+      ],
     }).compile();
 
     service = module.get<TenantService>(TenantService);
@@ -101,9 +109,11 @@ describe('TenantService', () => {
   describe('create', () => {
     it('should create a new tenant', async () => {
       // First call for checking existing slug - return empty
-      // Second call for findOne after insert - return the tenant
+      // Second call for checking existing domain - return empty
+      // Third call for findOne after insert - return the tenant
       mockDb.where
         .mockResolvedValueOnce([]) // slug check
+        .mockResolvedValueOnce([]) // domain check
         .mockResolvedValueOnce([mockTenant]); // findOne after insert
 
       const createDto = {

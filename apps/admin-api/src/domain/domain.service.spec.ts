@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { DomainService } from './domain.service';
+import { DatabaseProvisioningService } from './database-provisioning.service';
 
 // Mock the database module
 jest.mock('@org/database', () => ({
@@ -55,7 +56,13 @@ describe('DomainService', () => {
     (getLandlordDb as jest.Mock).mockReturnValue(mockDb);
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [DomainService],
+      providers: [
+        DomainService,
+        {
+          provide: DatabaseProvisioningService,
+          useValue: { provisionDatabase: jest.fn(), runMigrations: jest.fn() },
+        },
+      ],
     }).compile();
 
     service = module.get<DomainService>(DomainService);

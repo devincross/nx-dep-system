@@ -13,6 +13,7 @@ module.exports = {
   displayName: '@org/sync-worker',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
+  setupFiles: ['reflect-metadata'],
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig]
   },

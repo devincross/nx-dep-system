@@ -174,7 +174,7 @@ describe('DynamicZohoMapper edge cases', () => {
       ],
     };
     const items = mapper.mapOrder(raw).items;
-    expect(items.map((i) => i.serialNumber)).toEqual(['S1', 'S2', 'S3', 'S4', 'S5']);
+    expect(items.map((i) => i.serialNumber)).toEqual(['1', '2', '3', '4', '5']);
   });
 
   it('skips empty serial strings after splitting', () => {

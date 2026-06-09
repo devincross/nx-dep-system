@@ -13,6 +13,7 @@ module.exports = {
   displayName: '@org/admin-api',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
+  setupFiles: ['reflect-metadata'],
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig]
   },
