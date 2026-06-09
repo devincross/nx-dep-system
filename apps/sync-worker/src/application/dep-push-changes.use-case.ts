@@ -163,7 +163,7 @@ export class DepPushChangesUseCase {
     depItems: any[],
     customerId: string,
   ) {
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
     const dbTxnId = await txnRepo.create({
@@ -210,7 +210,7 @@ export class DepPushChangesUseCase {
     removedItems: OrderItemChangeEntity[],
     customerId: string,
   ) {
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
     const returnOrderNumber = `${order.depOrderId || order.externalOrderId}_RE_${Date.now()}`;
 
@@ -257,7 +257,7 @@ export class DepPushChangesUseCase {
     depItems: any[],
     customerId: string,
   ) {
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
     const dbTxnId = await txnRepo.create({
@@ -302,7 +302,7 @@ export class DepPushChangesUseCase {
     order: any,
     customerId: string,
   ) {
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
     const dbTxnId = await txnRepo.create({
@@ -344,7 +344,7 @@ export class DepPushChangesUseCase {
     addedItems: OrderItemChangeEntity[],
     customerId: string,
   ) {
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
     const dbTxnId = await txnRepo.create({

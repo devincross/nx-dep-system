@@ -82,7 +82,7 @@ export class DepEnrollUseCase {
     customerId: string,
     poNumber?: string,
   ): Promise<DepEnrollResult> {
-    const transactionId = `TXN_${uuidv4()}`;
+    const transactionId = uuidv4().replace(/-/g, "").slice(0, 20);
 
     // Record the transaction before sending
     const dbTxnId = await txnRepo.create({
@@ -131,7 +131,7 @@ export class DepEnrollUseCase {
     orderType: DepOrderType,
     input: EnrollOrderInput,
   ): Promise<DepEnrollResult> {
-    const transactionId = `TXN_${uuidv4()}`;
+    const transactionId = uuidv4().replace(/-/g, "").slice(0, 20);
 
     const enrollmentData: OrderEnrollmentData = {
       orderNumber: input.orderNumber,
