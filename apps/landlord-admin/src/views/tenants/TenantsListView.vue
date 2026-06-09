@@ -50,13 +50,8 @@ async function runMigrateAll() {
   }
 }
 
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'active': return 'success';
-    case 'inactive': return 'grey';
-    case 'suspended': return 'error';
-    default: return 'grey';
-  }
+function getStatusColor(isActive: boolean) {
+  return isActive ? 'success' : 'grey';
 }
 </script>
 
@@ -94,8 +89,8 @@ function getStatusColor(status: string) {
         :loading="tenantsStore.loading"
       >
         <template v-slot:item.status="{ item }">
-          <v-chip :color="getStatusColor(item.status)" size="small">
-            {{ item.status }}
+          <v-chip :color="getStatusColor(item.isActive)" size="small">
+            {{ item.isActive ? 'Active' : 'Inactive' }}
           </v-chip>
         </template>
         <template v-slot:item.syncEnabled="{ item }">

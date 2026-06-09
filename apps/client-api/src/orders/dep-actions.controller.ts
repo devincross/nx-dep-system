@@ -6,8 +6,6 @@ import {
   Param,
   ParseIntPipe,
   UseGuards,
-  Logger,
-  BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
@@ -32,8 +30,6 @@ class DepReconcileDto {
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
 export class DepActionsController {
-  private readonly logger = new Logger(DepActionsController.name);
-
   constructor(private readonly depActionsService: DepActionsService) {}
 
   /**

@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { eq, and, inArray, isNull } from 'drizzle-orm';
+import { Injectable } from "@nestjs/common";
+import { eq, inArray } from 'drizzle-orm';
 import { depTransactions, TenantDb } from '@org/database';
 
 export interface CreateDepTransaction {
@@ -16,7 +16,6 @@ export interface CreateDepTransaction {
 
 @Injectable()
 export class DepTransactionRepository {
-  private readonly logger = new Logger(DepTransactionRepository.name);
   private db: TenantDb | null = null;
 
   setDb(db: TenantDb): void {

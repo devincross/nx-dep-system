@@ -87,7 +87,7 @@ export class DepPollScheduler {
     });
 
     try {
-      const tenantDb = drizzle(connection) as TenantDb;
+      const tenantDb = drizzle(connection) as unknown as TenantDb;
       this.depTransactionRepo.setDb(tenantDb);
 
       // Find pending transactions

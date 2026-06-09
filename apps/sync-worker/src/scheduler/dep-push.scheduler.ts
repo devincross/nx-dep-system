@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
 import { eq, and } from 'drizzle-orm';
@@ -94,7 +94,7 @@ export class DepPushScheduler {
     });
 
     try {
-      const tenantDb = drizzle(connection) as TenantDb;
+      const tenantDb = drizzle(connection) as unknown as TenantDb;
 
       // Get DEP credentials
       const depCred = await this.getDepCredentials(tenantDb);

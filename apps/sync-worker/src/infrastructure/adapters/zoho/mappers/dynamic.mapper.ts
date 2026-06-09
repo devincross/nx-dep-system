@@ -81,9 +81,9 @@ export class DynamicZohoMapper implements MapperPort {
   private readonly truthyValues: string[];
 
   constructor(config?: FieldMappingsConfig) {
-    this.accountCfg = { ...DEFAULT_CONFIG.account, ...config?.account };
-    this.orderCfg = { ...DEFAULT_CONFIG.order, ...config?.order };
-    this.itemsCfg = { ...DEFAULT_CONFIG.orderItems, ...config?.orderItems };
+    this.accountCfg = { ...DEFAULT_CONFIG.account, ...config?.account } as Required<NonNullable<FieldMappingsConfig['account']>>;
+    this.orderCfg = { ...DEFAULT_CONFIG.order, ...config?.order } as Required<NonNullable<FieldMappingsConfig['order']>>;
+    this.itemsCfg = { ...DEFAULT_CONFIG.orderItems, ...config?.orderItems } as Required<NonNullable<FieldMappingsConfig['orderItems']>>;
     this.truthyValues = config?.truthyValues ?? DEFAULT_CONFIG.truthyValues;
   }
 

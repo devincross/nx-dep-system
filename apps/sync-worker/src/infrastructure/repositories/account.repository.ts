@@ -1,15 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 import { eq } from 'drizzle-orm';
 import { TenantDb, accounts } from '@org/database';
-import {
-  AccountRepositoryPort,
-  PersistedAccountEntity,
-} from '../../domain/ports/repository.port.js';
-import { AccountEntity } from '../../domain/entities/account.entity.js';
+import { AccountRepositoryPort } from '../../domain/ports/repository.port.js';
+import { AccountEntity, PersistedAccountEntity } from '../../domain/entities/account.entity.js';
 
 @Injectable()
 export class AccountRepository implements AccountRepositoryPort {
-  private readonly logger = new Logger(AccountRepository.name);
   private db: TenantDb | null = null;
 
   /**

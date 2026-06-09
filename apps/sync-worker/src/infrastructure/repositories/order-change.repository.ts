@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 import { eq, isNull, inArray } from 'drizzle-orm';
 import { TenantDb, orderChanges, orderItemChanges } from '@org/database';
 import {
@@ -12,7 +12,6 @@ import {
 
 @Injectable()
 export class OrderChangeRepository implements OrderChangeRepositoryPort {
-  private readonly logger = new Logger(OrderChangeRepository.name);
   private db: TenantDb | null = null;
 
   setDb(db: TenantDb): void {
@@ -118,8 +117,8 @@ export class OrderChangeRepository implements OrderChangeRepositoryPort {
       .where(eq(orderItemChanges.orderId, orderId));
 
     return {
-      orderChanges: orderChangeRows.filter(r => !r.syncedAt).map(this.toOrderChangeEntity),
-      itemChanges: itemChangeRows.filter(r => !r.syncedAt).map(this.toItemChangeEntity),
+      orderChanges: orderChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map(this.toOrderChangeEntity),
+      itemChanges: itemChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map(this.toItemChangeEntity),
     };
   }
 

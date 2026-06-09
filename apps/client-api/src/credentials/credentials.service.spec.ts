@@ -153,11 +153,6 @@ describe('CredentialsService', () => {
         ...mockDbCredential,
         status: 'disabled' as const,
       };
-      const updatedDecryptedCredential = {
-        ...updatedDbCredential,
-        connectionData: connectionDataPlain,
-      };
-
       // Mock the chained update().set().where() call
       mockDb.set.mockReturnValue({
         where: jest.fn().mockResolvedValue(undefined),

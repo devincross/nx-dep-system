@@ -5,10 +5,10 @@ import { TenantDb, orders, orderItems } from '@org/database';
 import {
   OrderRepositoryPort,
   OrderChangeRepositoryPort,
-  PersistedOrderEntity,
 } from '../../domain/ports/repository.port.js';
 import {
   OrderEntity,
+  PersistedOrderEntity,
   PersistedOrderItemEntity,
   OrderItemEntity,
   ChangedFields,
@@ -359,7 +359,7 @@ export class OrderRepository implements OrderRepositoryPort {
     });
 
     // Record all items as added
-    const itemChanges = order.items.map(item => ({
+    const itemChanges = order.items.map((item: PersistedOrderItemEntity) => ({
       orderId: order.id,
       orderItemId: item.id,
       serialNumber: item.serialNumber,

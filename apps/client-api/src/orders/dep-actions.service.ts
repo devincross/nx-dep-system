@@ -7,7 +7,6 @@ import {
   orders,
   orderItems,
   accounts,
-  credentials,
   depTransactions,
 } from '@org/database';
 import { CredentialsService } from '../credentials/credentials.service.js';
@@ -245,8 +244,6 @@ export class DepActionsService {
    */
   async reconcileOrders(tenant: TenantContext, orderIds?: number[]) {
     const db = tenant.db;
-    const metadata = tenant.tenant.metadata ? JSON.parse(tenant.tenant.metadata) : {};
-    const connectionType: 'netsuite' | 'zoho' = metadata.connectionType || 'netsuite';
 
     // Get orders from our DB
     let dbOrders;

@@ -39,7 +39,7 @@ function logout() {
           </template>
           <v-list>
             <v-list-item>
-              <v-list-item-title>{{ user?.name }}</v-list-item-title>
+              <v-list-item-title>{{ [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email }}</v-list-item-title>
               <v-list-item-subtitle>{{ user?.email }}</v-list-item-subtitle>
             </v-list-item>
             <v-divider></v-divider>

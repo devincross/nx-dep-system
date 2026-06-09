@@ -249,7 +249,7 @@ export class DepEnrollUseCase {
     request: unknown,
   ): Promise<void> {
     // We need to update just the request payload — use a direct status update
-    const db = (txnRepo as { db?: unknown }).db as
+    const db = (txnRepo as unknown as { db?: unknown }).db as
       | { update: (table: unknown) => { set: (data: unknown) => { where: (cond: unknown) => Promise<unknown> } } }
       | undefined;
     if (db) {

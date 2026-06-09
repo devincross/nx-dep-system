@@ -164,12 +164,6 @@ async function handleDelete() {
   deleteDialog.value = false;
 }
 
-function toggleSelectOrder(id: number) {
-  const idx = selectedOrders.value.indexOf(id);
-  if (idx >= 0) selectedOrders.value.splice(idx, 1);
-  else selectedOrders.value.push(id);
-}
-
 onMounted(() => {
   ordersStore.fetchAll();
 });

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 import { eq, desc } from 'drizzle-orm';
 import { TenantDb, syncStatus } from '@org/database';
 import {
@@ -8,7 +8,6 @@ import {
 
 @Injectable()
 export class SyncStatusRepository implements SyncStatusRepositoryPort {
-  private readonly logger = new Logger(SyncStatusRepository.name);
   private db: TenantDb | null = null;
 
   setDb(db: TenantDb): void {

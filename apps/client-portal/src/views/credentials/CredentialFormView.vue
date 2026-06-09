@@ -114,13 +114,6 @@ const orderItemMappingFields = [
 // Field definitions for each type
 const depFields = ['ssl_key', 'ssl_cert', 'apple_api_url', 'dep_reseller_id', 'sap_ship_to', 'sap_sold_to'];
 const zohoConnectionFields = ['client_id', 'client_secret', 'refresh_token', 'api_domain', 'accounts_module', 'orders_module'];
-const netsuiteFields = [
-  'netsuite_restlet_host', 'netsuite_account', 'auth_type',
-  'client_id', 'certificate_id', 'private_key', 'certificate_pem',
-  'client_secret', 'netsuite_realm',
-  'netsuite_consumer_key', 'netsuite_consumer_secret', 'netsuite_token', 'netsuite_token_secret',
-  'netsuite_signature_algorithm', 'netsuite_deploy_id', 'netsuite_order_script_id', 'netsuite_account_script_id', 'mapping_class'
-];
 
 const zohoFieldDefaults: Record<string, string> = {
   api_domain: 'https://www.zohoapis.com',

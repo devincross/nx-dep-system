@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { TenantDb, syncStatus, orders, accounts, orderItems } from '@org/database';
 
 export interface SyncStatusResult {

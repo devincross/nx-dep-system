@@ -5,7 +5,6 @@ import { CredentialsService } from './credentials.service';
 
 describe('CredentialsController', () => {
   let controller: CredentialsController;
-  let service: CredentialsService;
 
   const mockCredential = {
     id: 1,
@@ -46,7 +45,6 @@ describe('CredentialsController', () => {
     }).compile();
 
     controller = module.get<CredentialsController>(CredentialsController);
-    service = module.get<CredentialsService>(CredentialsService);
   });
 
   afterEach(() => {

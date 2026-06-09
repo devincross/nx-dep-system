@@ -413,7 +413,7 @@ export class DepPushChangesUseCase {
 
   private async storeRequest(txnRepo: DepTransactionRepository, dbTxnId: number, request: unknown) {
     try {
-      const db = (txnRepo as { db?: unknown }).db as
+      const db = (txnRepo as unknown as { db?: unknown }).db as
         | { update: (table: unknown) => { set: (data: unknown) => { where: (cond: unknown) => Promise<unknown> } } }
         | undefined;
       if (db) {

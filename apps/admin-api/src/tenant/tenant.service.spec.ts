@@ -109,6 +109,7 @@ describe('TenantService', () => {
       const createDto = {
         name: 'Test Tenant',
         slug: 'test-tenant',
+        subdomain: 'test',
       };
 
       const result = await service.create(createDto);
@@ -123,6 +124,7 @@ describe('TenantService', () => {
       const createDto = {
         name: 'Test Tenant',
         slug: 'test-tenant',
+        subdomain: 'test',
       };
 
       await expect(service.create(createDto)).rejects.toThrow(ConflictException);

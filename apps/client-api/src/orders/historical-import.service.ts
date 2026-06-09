@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
-import { eq, isNull, and, desc } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
@@ -10,7 +10,6 @@ import {
   orderItems,
   accounts,
   syncStatus as syncStatusTable,
-  credentials,
 } from '@org/database';
 
 export interface ImportResult {

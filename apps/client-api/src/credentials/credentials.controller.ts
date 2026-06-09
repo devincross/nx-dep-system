@@ -10,7 +10,6 @@ import {
   HttpStatus,
   ParseIntPipe,
   UseGuards,
-  Query,
 } from '@nestjs/common';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';

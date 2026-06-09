@@ -2,11 +2,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
-  landlordDb,
+  getLandlordDb,
   tenants,
-  tenantDomains,
   credentials,
   TenantDb,
 } from '@org/database';
@@ -74,7 +73,7 @@ export class SyncScheduler implements OnModuleInit {
    * Get all tenants with sync enabled from landlord database
    */
   private async getSyncEnabledTenants() {
-    const results = await landlordDb
+    const results = await getLandlordDb()
       .select()
       .from(tenants)
       .where(
@@ -176,7 +175,7 @@ export class SyncScheduler implements OnModuleInit {
         password: process.env['DB_PASSWORD'] || '',
         database: dbName,
       });
-      return drizzle(connection) as TenantDb;
+      return drizzle(connection) as unknown as TenantDb;
     } catch (error) {
       this.logger.error(`Failed to connect to tenant DB: ${error}`);
       return null;

@@ -173,7 +173,7 @@ export class ZohoAdapter implements DataSourcePort {
       throw new Error(`Zoho API error: ${response.status} - ${errorText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number } }>;
   }
 
   private async getAccessToken(): Promise<string> {
