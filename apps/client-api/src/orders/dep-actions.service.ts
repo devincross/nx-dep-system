@@ -290,7 +290,8 @@ export class DepActionsService {
       completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
     } else if (response.statusCode === 'ERROR') {
       status = 'error';
-      errorMessage = this.extractDeviceErrors(response);
+      errorCode = response.errorCode ?? null;
+      errorMessage = this.extractAnyErrorMessage(response);
       completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
     } else if (Array.isArray(response.checkTransactionErrorResponse) && response.checkTransactionErrorResponse.length > 0) {
       const errors = response.checkTransactionErrorResponse;
@@ -329,9 +330,39 @@ export class DepActionsService {
     };
   }
 
-  private extractDeviceErrors(response: any): string {
+  private extractAnyErrorMessage(response: any): string {
     const messages: string[] = [];
+
+    // Top-level error
+    if (response.errorMessage) {
+      messages.push(
+        response.errorCode ? `${response.errorCode}: ${response.errorMessage}` : response.errorMessage,
+      );
+    }
+
+    // Array-of-errors variant
+    if (Array.isArray(response.checkTransactionErrorResponse)) {
+      for (const e of response.checkTransactionErrorResponse) {
+        if (e?.errorMessage || e?.errorCode) {
+          messages.push(`${e.errorCode ?? ''}: ${e.errorMessage ?? ''}`.replace(/^: /, ''));
+        }
+      }
+    }
+
+    // enrollDeviceErrorResponse — appears on enroll failures echoed back via status check
+    const ede = response.enrollDeviceErrorResponse;
+    if (ede?.errorMessage || ede?.errorCode) {
+      messages.push(`${ede.errorCode ?? ''}: ${ede.errorMessage ?? ''}`.replace(/^: /, ''));
+    }
+
+    // Per-order errors
     for (const order of response.orders ?? []) {
+      if (Array.isArray(order.orderErrorMessages)) {
+        for (const m of order.orderErrorMessages) {
+          messages.push(typeof m === 'string' ? m : JSON.stringify(m));
+        }
+      }
+      // Per-device errors
       for (const delivery of order.deliveries ?? []) {
         for (const device of delivery.devices ?? []) {
           if (device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
@@ -342,7 +373,13 @@ export class DepActionsService {
         }
       }
     }
-    return messages.join('; ') || 'Unknown error';
+
+    // Fallback to a trimmed snippet of the full response so the user can see SOMETHING
+    if (messages.length === 0) {
+      return `No structured error fields; raw response: ${JSON.stringify(response).slice(0, 400)}`;
+    }
+
+    return messages.join('; ');
   }
 
   /**
