@@ -3,7 +3,6 @@ import { OrderChangeRepositoryPort } from '../domain/ports/repository.port.js';
 import {
   DownstreamSyncPort,
   OrderChangePayload,
-  PushBatchResult,
 } from '../domain/ports/downstream-sync.port.js';
 import { OrderRepositoryPort } from '../domain/ports/repository.port.js';
 import { OrderChangeEntity, OrderItemChangeEntity } from '../domain/entities/index.js';

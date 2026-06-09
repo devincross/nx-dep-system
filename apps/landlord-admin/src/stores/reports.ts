@@ -29,7 +29,7 @@ export const useReportsStore = defineStore('reports', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  async function fetchUsageReport(days: number = 30): Promise<UsageReportResponse> {
+  async function fetchUsageReport(days = 30): Promise<UsageReportResponse> {
     loading.value = true;
     error.value = null;
     try {

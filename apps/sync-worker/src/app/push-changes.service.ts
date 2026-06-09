@@ -1,12 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
-  landlordDb,
+  getLandlordDb,
   tenants,
-  tenantDomains,
-  credentials,
   TenantDb,
 } from '@org/database';
 import { PushChangesUseCase } from '../application/push-changes.use-case.js';
@@ -214,22 +212,21 @@ export class PushChangesService {
       database: tenant.dbName,
     });
 
-    return drizzle(connection) as TenantDb;
+    return drizzle(connection) as unknown as TenantDb;
   }
 
   private async getSyncEnabledTenants(): Promise<TenantRecord[]> {
-    const results = await landlordDb
+    const results = await getLandlordDb()
       .select()
       .from(tenants)
       .where(
         and(
           eq(tenants.isActive, true),
-          eq(tenants.syncEnabled, true),
-          isNull(tenants.deletedAt)
+          eq(tenants.syncEnabled, true)
         )
       );
 
-    return results.map(t => ({
+    return results.map((t: TenantRecord) => ({
       id: t.id,
       slug: t.slug,
       dbHost: t.dbHost,
@@ -241,18 +238,17 @@ export class PushChangesService {
   }
 
   private async getTenantBySlug(slug: string): Promise<TenantRecord[]> {
-    const results = await landlordDb
+    const results = await getLandlordDb()
       .select()
       .from(tenants)
       .where(
         and(
           eq(tenants.slug, slug),
-          eq(tenants.isActive, true),
-          isNull(tenants.deletedAt)
+          eq(tenants.isActive, true)
         )
       );
 
-    return results.map(t => ({
+    return results.map((t: TenantRecord) => ({
       id: t.id,
       slug: t.slug,
       dbHost: t.dbHost,

@@ -28,7 +28,7 @@ export interface UsageReportResponse {
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
 
-  async getUsageReport(days: number = 30): Promise<UsageReportResponse> {
+  async getUsageReport(days = 30): Promise<UsageReportResponse> {
     const db = getLandlordDb();
 
     // Get all tenants with their primary domain

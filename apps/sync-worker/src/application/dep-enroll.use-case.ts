@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
+import { eq } from 'drizzle-orm';
+import { depTransactions } from '@org/database';
 import { DepSyncAdapter, BulkEnrollResponse } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderEnrollmentData, DepOrderType } from '../infrastructure/adapters/dep/dep-payload-builder.js';
@@ -247,10 +249,10 @@ export class DepEnrollUseCase {
     request: unknown,
   ): Promise<void> {
     // We need to update just the request payload — use a direct status update
-    const db = (txnRepo as any).db;
+    const db = (txnRepo as { db?: unknown }).db as
+      | { update: (table: unknown) => { set: (data: unknown) => { where: (cond: unknown) => Promise<unknown> } } }
+      | undefined;
     if (db) {
-      const { depTransactions } = await import('@org/database');
-      const { eq } = await import('drizzle-orm');
       await db
         .update(depTransactions)
         .set({ requestPayload: JSON.stringify(request) })

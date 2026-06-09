@@ -36,9 +36,9 @@ export class ZohoBaseMapper implements MapperPort {
     return {
       externalOrderId: String(raw['id'] ?? raw['Id'] ?? raw['SO_Number'] ?? ''),
       externalAccountId: String(
-        raw['Account_Name']?.['id'] ?? 
-        raw['Account_Name'] ?? 
-        raw['account_id'] ?? 
+        (raw['Account_Name'] as { id?: unknown })?.id ??
+        raw['Account_Name'] ??
+        raw['account_id'] ??
         ''
       ),
       externalOrderStatus: raw['Status'] ? String(raw['Status']) : undefined,

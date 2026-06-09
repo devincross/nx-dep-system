@@ -34,7 +34,7 @@ export class NetsuiteAdapter implements DataSourcePort {
   private readonly logger = new Logger(NetsuiteAdapter.name);
   private config: NetsuiteConfig | null = null;
   private accessToken: string | null = null;
-  private tokenExpiresAt: number = 0;
+  private tokenExpiresAt = 0;
 
   /**
    * Configure the adapter with NetSuite credentials
@@ -56,7 +56,8 @@ export class NetsuiteAdapter implements DataSourcePort {
 
     const response = await this.makeRequest('GET', this.config!.accountScriptId, params);
     
-    const data = Array.isArray(response) ? response : (response?.data ?? response?.results ?? []);
+    const wrapped = response as { data?: unknown[]; results?: unknown[] } | undefined;
+    const data = Array.isArray(response) ? response : (wrapped?.data ?? wrapped?.results ?? []);
     
     return {
       data: data as RawAccountData[],
@@ -76,7 +77,8 @@ export class NetsuiteAdapter implements DataSourcePort {
 
     const response = await this.makeRequest('GET', this.config!.orderScriptId, params);
     
-    const data = Array.isArray(response) ? response : (response?.data ?? response?.results ?? []);
+    const wrapped = response as { data?: unknown[]; results?: unknown[] } | undefined;
+    const data = Array.isArray(response) ? response : (wrapped?.data ?? wrapped?.results ?? []);
     
     return {
       data: data as RawOrderData[],

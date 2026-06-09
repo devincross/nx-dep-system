@@ -279,7 +279,7 @@ export class DepActionsService {
       .map((o) => o.depOrderId || o.externalOrderId)
       .filter(Boolean) as string[];
 
-    let depData: Record<string, any> = {};
+    const depData: Record<string, any> = {};
     if (depCred && depOrderNumbers.length > 0) {
       try {
         const request = {

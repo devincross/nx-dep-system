@@ -130,7 +130,7 @@ export class AppController {
       let expirationWarning: string | undefined;
       let daysUntilExpiry: number | undefined;
       let hasCertificate = false;
-      let hasPrivateKey = !!sslKey;
+      const hasPrivateKey = !!sslKey;
 
       if (sslCert) {
         try {

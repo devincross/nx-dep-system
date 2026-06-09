@@ -3,13 +3,14 @@
   "compilerOptions": {
     "outDir": "dist",
     "types": ["vite/client"],
+    "lib": ["es2022", "dom", "dom.iterable"],
     "rootDir": "src",
     "jsx": "preserve",
     "jsxImportSource": "vue",
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo"
+    "noEmit": true
   },
   "exclude": [
     "out-tsc",

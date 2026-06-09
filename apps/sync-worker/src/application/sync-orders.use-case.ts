@@ -69,7 +69,7 @@ export class SyncOrdersUseCase {
             });
             
             // Upsert the order with the new account
-            const { entity, created } = await orderRepository.upsert(orderEntity, newAccount.id);
+            const { created } = await orderRepository.upsert(orderEntity, newAccount.id);
             result.processed++;
             if (created) result.created++;
             else result.updated++;

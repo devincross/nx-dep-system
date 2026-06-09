@@ -21,7 +21,7 @@ export class ZohoAdapter implements DataSourcePort {
   private readonly logger = new Logger(ZohoAdapter.name);
   private config: ZohoConfig | null = null;
   private accessToken: string | null = null;
-  private tokenExpiresAt: number = 0;
+  private tokenExpiresAt = 0;
 
   /**
    * Configure the adapter with Zoho credentials

@@ -121,7 +121,7 @@ export class SyncStatusService {
    */
   async getSyncHistory(
     db: TenantDb,
-    limit: number = 10
+    limit = 10
   ): Promise<SyncStatusResult[]> {
     try {
       const results = await db

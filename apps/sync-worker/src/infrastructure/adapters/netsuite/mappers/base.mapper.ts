@@ -38,10 +38,10 @@ export class NetsuiteBaseMapper implements MapperPort {
     return {
       externalOrderId: String(raw['id'] ?? raw['internalid'] ?? raw['tranid'] ?? ''),
       externalAccountId: String(
-        raw['entity']?.['id'] ?? 
-        raw['entity'] ?? 
-        raw['customer']?.['id'] ?? 
-        raw['customer'] ?? 
+        (raw['entity'] as { id?: unknown })?.id ??
+        raw['entity'] ??
+        (raw['customer'] as { id?: unknown })?.id ??
+        raw['customer'] ??
         ''
       ),
       externalOrderStatus: raw['status'] ? String(raw['status']) : undefined,
