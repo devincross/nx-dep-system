@@ -221,7 +221,7 @@ onMounted(() => {
           </v-col>
         </v-row>
       </v-card-title>
-      <v-data-table :headers="headers" :items="filteredOrders" :loading="ordersStore.loading" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
+      <v-data-table :headers="headers" :items="filteredOrders" :loading="ordersStore.loading" :sort-by="[{ key: 'id', order: 'desc' }]" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
         <template v-slot:item.status="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">{{ item.status }}</v-chip>
         </template>
