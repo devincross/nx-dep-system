@@ -44,6 +44,19 @@ export {
   accountsRelations,
   ordersRelations,
   orderItemsRelations,
+  syncStatus,
+  syncStatusEnum,
+  syncTypeEnum,
+  orderChanges,
+  orderItemChanges,
+  orderChangeTypeEnum,
+  orderItemChangeTypeEnum,
+  orderChangesRelations,
+  orderItemChangesRelations,
+  depTransactions,
+  depTransactionStatusEnum,
+  depOrderTypeEnum,
+  depTransactionsRelations,
 } from './tenant/schema.js';
 
 export type {
@@ -66,6 +79,20 @@ export type {
   NewOrderItem,
   OrderStatus,
   OrderItemDepStatus,
+  SyncStatus,
+  NewSyncStatus,
+  SyncStatusType,
+  SyncType,
+  OrderChange,
+  NewOrderChange,
+  OrderItemChange,
+  NewOrderItemChange,
+  OrderChangeType,
+  OrderItemChangeType,
+  DepTransaction,
+  NewDepTransaction,
+  DepTransactionStatus,
+  DepOrderType,
 } from './tenant/schema.js';
 
 export {
@@ -75,4 +102,8 @@ export {
 } from './tenant/connection-manager.js';
 
 export type { TenantDb } from './tenant/connection-manager.js';
+
+// Migration utilities
+export { migrateLandlordDb, migrateTenantDb } from './migrate.js';
+export type { MigrateDbConfig } from './migrate.js';
 

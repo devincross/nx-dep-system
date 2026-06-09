@@ -25,7 +25,7 @@ export class AuthService {
     const db = getLandlordDb();
     const result = await db.select().from(landlordUsers);
     // Remove password from response
-    return result.map(({ password, ...user }) => user);
+    return result.map(({ password: _password, ...user }) => user);
   }
 
   async findOne(id: string): Promise<Omit<LandlordUser, 'password'>> {

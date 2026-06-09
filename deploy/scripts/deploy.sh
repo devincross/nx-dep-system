@@ -4,6 +4,9 @@
 # ===========================================
 # Run this script to manually deploy the latest version
 # Usage: ./deploy.sh [tag]
+#
+# Environment variables:
+#   BUILD_LOCAL=true  - Build images locally instead of pulling from registry
 
 set -e
 
@@ -17,9 +20,14 @@ cd $DEPLOY_DIR
 # Set image tag
 export IMAGE_TAG=$TAG
 
-# Pull latest images
-echo "Pulling latest images..."
-docker compose -f docker-compose.prod.yml pull
+# Build or pull images based on environment
+if [ "$BUILD_LOCAL" = "true" ]; then
+  echo "Building images locally..."
+  docker compose -f docker-compose.prod.yml build
+else
+  echo "Pulling latest images..."
+  docker compose -f docker-compose.prod.yml pull
+fi
 
 # Stop existing containers
 echo "Stopping existing containers..."

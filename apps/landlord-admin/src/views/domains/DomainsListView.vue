@@ -7,6 +7,7 @@ const domainsStore = useDomainsStore();
 const deleteDialog = ref(false);
 const domainToDelete = ref<Domain | null>(null);
 const testingConnection = ref<string | null>(null);
+const provisioningDatabase = ref<string | null>(null);
 const testResult = ref<{ success: boolean; message: string } | null>(null);
 
 onMounted(() => {
@@ -38,6 +39,21 @@ async function testConnection(domain: Domain) {
     };
   } finally {
     testingConnection.value = null;
+  }
+}
+
+async function provisionDatabase(domain: Domain) {
+  provisioningDatabase.value = domain.id;
+  testResult.value = null;
+  try {
+    testResult.value = await domainsStore.provisionDatabase(domain.id);
+  } catch (err: any) {
+    testResult.value = {
+      success: false,
+      message: err.response?.data?.message || 'Database provisioning failed',
+    };
+  } finally {
+    provisioningDatabase.value = null;
   }
 }
 </script>
@@ -73,13 +89,16 @@ async function testConnection(domain: Domain) {
           </v-icon>
         </template>
         <template v-slot:item.actions="{ item }">
-          <v-btn icon size="small" :loading="testingConnection === item.id" @click="testConnection(item)">
+          <v-btn icon size="small" :loading="testingConnection === item.id" @click="testConnection(item)" title="Test Connection">
             <v-icon>mdi-connection</v-icon>
           </v-btn>
-          <v-btn icon size="small" :to="`/domains/${item.id}/edit`">
+          <v-btn icon size="small" color="primary" :loading="provisioningDatabase === item.id" @click="provisionDatabase(item)" title="Provision Database">
+            <v-icon>mdi-database-sync</v-icon>
+          </v-btn>
+          <v-btn icon size="small" :to="`/domains/${item.id}/edit`" title="Edit">
             <v-icon>mdi-pencil</v-icon>
           </v-btn>
-          <v-btn icon size="small" color="error" @click="confirmDelete(item)">
+          <v-btn icon size="small" color="error" @click="confirmDelete(item)" title="Delete">
             <v-icon>mdi-delete</v-icon>
           </v-btn>
         </template>

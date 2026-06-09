@@ -35,6 +35,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/orders/historical-import',
+      name: 'orders-historical-import',
+      component: () => import('../views/orders/HistoricalImportView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/orders/:id',
       name: 'orders-detail',
       component: () => import('../views/orders/OrderDetailView.vue'),
@@ -63,6 +69,13 @@ const router = createRouter({
       path: '/credentials/:id/edit',
       name: 'credentials-edit',
       component: () => import('../views/credentials/CredentialFormView.vue'),
+      meta: { requiresAuth: true },
+    },
+    // Zoho OAuth callback
+    {
+      path: '/zoho/callback',
+      name: 'zoho-callback',
+      component: () => import('../views/ZohoCallbackView.vue'),
       meta: { requiresAuth: true },
     },
     // NetSuite route

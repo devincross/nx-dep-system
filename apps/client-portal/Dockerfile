@@ -1,5 +1,5 @@
 # Build stage
-FROM docker.io/node:lts-alpine AS builder
+FROM docker.io/node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -14,6 +14,9 @@ RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY apps/client-portal/ ./apps/client-portal/
 COPY tsconfig.base.json ./
 COPY nx.json ./
+
+# Set API URL for production build (relative URL since nginx proxies /api)
+ENV VITE_API_URL=/api
 
 # Build the application
 RUN pnpm exec nx build @org/client-portal --configuration=production

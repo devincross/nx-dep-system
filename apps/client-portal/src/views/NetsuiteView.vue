@@ -15,6 +15,8 @@ const activeTab = ref('status');
 // Orders and Accounts data
 const ordersResponse = ref<NetsuiteResponse | null>(null);
 const accountsResponse = ref<NetsuiteResponse | null>(null);
+const ordersLastModified = ref('');
+const accountsLastModified = ref('');
 
 // Generic RESTlet call
 const restletScriptId = ref('');
@@ -28,7 +30,7 @@ async function loadStatus() {
   try {
     status.value = await netsuiteStore.fetchStatus();
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to load NetSuite status';
+    error.value = err.response?.data?.message || 'Unable to load your NetSuite connection status. Please try again.';
   } finally {
     loading.value = false;
   }
@@ -41,7 +43,7 @@ async function testConnection() {
   try {
     testResult.value = await netsuiteStore.testConnection();
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to test connection';
+    error.value = err.response?.data?.message || 'Connection test failed. Please check your NetSuite credentials and try again.';
   } finally {
     loading.value = false;
   }
@@ -51,9 +53,10 @@ async function fetchOrders() {
   loading.value = true;
   error.value = '';
   try {
-    ordersResponse.value = await netsuiteStore.getOrders();
+    const query = ordersLastModified.value ? { last_modified: ordersLastModified.value } : undefined;
+    ordersResponse.value = await netsuiteStore.getOrders(query);
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to fetch orders';
+    error.value = err.response?.data?.message || 'Unable to retrieve orders from NetSuite. Please check your connection and try again.';
   } finally {
     loading.value = false;
   }
@@ -63,9 +66,10 @@ async function fetchAccounts() {
   loading.value = true;
   error.value = '';
   try {
-    accountsResponse.value = await netsuiteStore.getAccounts();
+    const query = accountsLastModified.value ? { last_modified: accountsLastModified.value } : undefined;
+    accountsResponse.value = await netsuiteStore.getAccounts(query);
   } catch (err: any) {
-    error.value = err.response?.data?.message || 'Failed to fetch accounts';
+    error.value = err.response?.data?.message || 'Unable to retrieve accounts from NetSuite. Please check your connection and try again.';
   } finally {
     loading.value = false;
   }
@@ -83,9 +87,9 @@ async function callRestlet() {
     restletResponse.value = await netsuiteStore.callRestlet(restletScriptId.value, restletMethod.value, data);
   } catch (err: any) {
     if (err instanceof SyntaxError) {
-      error.value = 'Invalid JSON in request data';
+      error.value = 'The request data is not valid JSON. Please check the format and try again.';
     } else {
-      error.value = err.response?.data?.message || 'Failed to call RESTlet';
+      error.value = err.response?.data?.message || 'Unable to call the NetSuite script. Please check the Script ID and try again.';
     }
   } finally {
     loading.value = false;
@@ -100,16 +104,16 @@ onMounted(() => { loadStatus(); });
     <h1 class="text-h4 mb-6">NetSuite Integration</h1>
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
     <v-tabs v-model="activeTab" color="primary">
-      <v-tab value="status">Status</v-tab>
+      <v-tab value="status">Connection Status</v-tab>
       <v-tab value="orders">Orders</v-tab>
       <v-tab value="accounts">Accounts</v-tab>
-      <v-tab value="restlet">Generic RESTlet</v-tab>
+      <v-tab value="restlet">Custom Script</v-tab>
     </v-tabs>
     <v-tabs-window v-model="activeTab">
       <!-- Status Tab -->
       <v-tabs-window-item value="status">
         <v-card class="mt-4">
-          <v-card-title>NetSuite Credential Status</v-card-title>
+          <v-card-title>NetSuite Connection Details</v-card-title>
           <v-card-text>
             <v-progress-linear v-if="loading && !status" indeterminate color="primary"></v-progress-linear>
             <v-list v-if="status" dense>
@@ -130,15 +134,53 @@ onMounted(() => { loadStatus(); });
       </v-tabs-window-item>
       <!-- Orders Tab -->
       <v-tabs-window-item value="orders">
-        <v-card class="mt-4"><v-card-title>NetSuite Orders</v-card-title><v-card-actions><v-btn color="primary" :loading="loading" @click="fetchOrders" prepend-icon="mdi-download">Fetch Orders</v-btn></v-card-actions><v-card-text v-if="ordersResponse"><v-alert :type="ordersResponse.success ? 'success' : 'error'" class="mb-4">{{ ordersResponse.success ? 'Success' : ordersResponse.error }}</v-alert><pre v-if="ordersResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(ordersResponse.data, null, 2) }}</pre></v-card-text></v-card>
+        <v-card class="mt-4">
+          <v-card-title>NetSuite Orders</v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="ordersLastModified"
+              type="date"
+              label="Last Modified (since)"
+              hint="Leave blank to fetch all orders"
+              persistent-hint
+              clearable
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-btn color="primary" :loading="loading" @click="fetchOrders" prepend-icon="mdi-download">Fetch Orders</v-btn>
+          </v-card-actions>
+          <v-card-text v-if="ordersResponse">
+            <v-alert :type="ordersResponse.success ? 'success' : 'error'" class="mb-4">{{ ordersResponse.success ? 'Success' : ordersResponse.error }}</v-alert>
+            <pre v-if="ordersResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(ordersResponse.data, null, 2) }}</pre>
+          </v-card-text>
+        </v-card>
       </v-tabs-window-item>
       <!-- Accounts Tab -->
       <v-tabs-window-item value="accounts">
-        <v-card class="mt-4"><v-card-title>NetSuite Accounts</v-card-title><v-card-actions><v-btn color="primary" :loading="loading" @click="fetchAccounts" prepend-icon="mdi-download">Fetch Accounts</v-btn></v-card-actions><v-card-text v-if="accountsResponse"><v-alert :type="accountsResponse.success ? 'success' : 'error'" class="mb-4">{{ accountsResponse.success ? 'Success' : accountsResponse.error }}</v-alert><pre v-if="accountsResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(accountsResponse.data, null, 2) }}</pre></v-card-text></v-card>
+        <v-card class="mt-4">
+          <v-card-title>NetSuite Accounts</v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="accountsLastModified"
+              type="date"
+              label="Last Modified (since)"
+              hint="Leave blank to fetch all accounts"
+              persistent-hint
+              clearable
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-btn color="primary" :loading="loading" @click="fetchAccounts" prepend-icon="mdi-download">Fetch Accounts</v-btn>
+          </v-card-actions>
+          <v-card-text v-if="accountsResponse">
+            <v-alert :type="accountsResponse.success ? 'success' : 'error'" class="mb-4">{{ accountsResponse.success ? 'Success' : accountsResponse.error }}</v-alert>
+            <pre v-if="accountsResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(accountsResponse.data, null, 2) }}</pre>
+          </v-card-text>
+        </v-card>
       </v-tabs-window-item>
       <!-- Generic RESTlet Tab -->
       <v-tabs-window-item value="restlet">
-        <v-card class="mt-4"><v-card-title>Generic RESTlet Call</v-card-title><v-card-text><v-row><v-col cols="12" md="4"><v-text-field v-model="restletScriptId" label="Script ID" required></v-text-field></v-col><v-col cols="12" md="4"><v-select v-model="restletMethod" :items="['GET', 'POST', 'PUT', 'DELETE']" label="Method"></v-select></v-col></v-row><v-textarea v-model="restletData" label="Request Data (JSON)" rows="5" hint="Enter valid JSON for POST/PUT requests"></v-textarea></v-card-text><v-card-actions><v-btn color="primary" :loading="loading" @click="callRestlet" :disabled="!restletScriptId" prepend-icon="mdi-send">Call RESTlet</v-btn></v-card-actions><v-card-text v-if="restletResponse"><v-alert :type="restletResponse.success ? 'success' : 'error'" class="mb-4">{{ restletResponse.success ? 'Success' : restletResponse.error }}</v-alert><pre v-if="restletResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(restletResponse.data, null, 2) }}</pre></v-card-text></v-card>
+        <v-card class="mt-4"><v-card-title>Custom Script Call</v-card-title><v-card-text><v-row><v-col cols="12" md="4"><v-text-field v-model="restletScriptId" label="Script ID" required></v-text-field></v-col><v-col cols="12" md="4"><v-select v-model="restletMethod" :items="['GET', 'POST', 'PUT', 'DELETE']" label="Method"></v-select></v-col></v-row><v-textarea v-model="restletData" label="Request Data (JSON)" rows="5" hint="Enter valid JSON for POST/PUT requests"></v-textarea></v-card-text><v-card-actions><v-btn color="primary" :loading="loading" @click="callRestlet" :disabled="!restletScriptId" prepend-icon="mdi-send">Run Script</v-btn></v-card-actions><v-card-text v-if="restletResponse"><v-alert :type="restletResponse.success ? 'success' : 'error'" class="mb-4">{{ restletResponse.success ? 'Success' : restletResponse.error }}</v-alert><pre v-if="restletResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(restletResponse.data, null, 2) }}</pre></v-card-text></v-card>
       </v-tabs-window-item>
     </v-tabs-window>
   </div>

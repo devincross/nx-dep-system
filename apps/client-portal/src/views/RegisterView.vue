@@ -6,7 +6,8 @@ import { useAuthStore } from '../stores/auth';
 const router = useRouter();
 const authStore = useAuthStore();
 
-const name = ref('');
+const firstName = ref('');
+const lastName = ref('');
 const email = ref('');
 const password = ref('');
 const confirmPassword = ref('');
@@ -24,7 +25,8 @@ async function handleRegister() {
   error.value = '';
   try {
     await authStore.register({
-      name: name.value,
+      firstName: firstName.value,
+      lastName: lastName.value,
       email: email.value,
       password: password.value,
     });
@@ -51,12 +53,18 @@ async function handleRegister() {
                 {{ error }}
               </v-alert>
               <v-text-field
-                v-model="name"
-                label="Name"
-                name="name"
+                v-model="firstName"
+                label="First Name"
+                name="firstName"
                 prepend-icon="mdi-account"
                 type="text"
-                required
+              ></v-text-field>
+              <v-text-field
+                v-model="lastName"
+                label="Last Name"
+                name="lastName"
+                prepend-icon="mdi-account"
+                type="text"
               ></v-text-field>
               <v-text-field
                 v-model="email"

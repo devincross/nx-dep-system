@@ -1,5 +1,5 @@
 # Build stage
-FROM docker.io/node:lts-alpine AS builder
+FROM docker.io/node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -15,11 +15,16 @@ RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY apps/admin-api/ ./apps/admin-api/
 COPY libs/database/ ./libs/database/
 COPY tsconfig.base.json ./
+COPY tsconfig.json ./
 COPY nx.json ./
 COPY eslint.config.mjs ./
+COPY pnpm-workspace.yaml ./
 
-# Build the application
-RUN pnpm exec nx build @org/admin-api --configuration=production
+# Build the database library first (dependency)
+RUN cd libs/database && pnpm exec tsc --build
+
+# Sync Nx workspace and build the application
+RUN pnpm exec nx sync && pnpm exec nx build @org/admin-api --configuration=production
 
 # Remove @org/* packages from dependencies (they're bundled)
 RUN cd apps/admin-api/dist && \
@@ -28,7 +33,7 @@ RUN cd apps/admin-api/dist && \
     require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2));"
 
 # Production stage
-FROM docker.io/node:lts-alpine
+FROM docker.io/node:24-alpine
 
 ENV HOST=0.0.0.0
 ENV PORT=3000
@@ -38,6 +43,9 @@ WORKDIR /app
 
 # Copy built application and cleaned package.json
 COPY --from=builder /app/apps/admin-api/dist ./
+
+# Copy database migration files (for auto-migrate on startup)
+COPY --from=builder /app/libs/database/drizzle ./drizzle
 
 # Install production dependencies
 RUN npm install --omit=dev --ignore-scripts

@@ -8,9 +8,21 @@ import { CredentialsModule } from '../credentials/credentials.module.js';
 import { EncryptionModule } from '../encryption/encryption.module.js';
 import { OrdersModule } from '../orders/orders.module.js';
 import { NetsuiteModule } from '../netsuite/netsuite.module.js';
+import { SyncStatusModule } from '../sync-status/sync-status.module.js';
+import { ZohoModule } from '../zoho/zoho.module.js';
 
 @Module({
-  imports: [EncryptionModule, TenantModule, UserModule, AuthModule, CredentialsModule, OrdersModule, NetsuiteModule],
+  imports: [
+    EncryptionModule,
+    TenantModule,
+    UserModule,
+    AuthModule,
+    CredentialsModule,
+    OrdersModule,
+    NetsuiteModule,
+    ZohoModule,
+    SyncStatusModule,
+  ],
   controllers: [AppController],
 })
 export class AppModule implements NestModule {

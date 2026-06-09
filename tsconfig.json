@@ -17,6 +17,15 @@
     },
     {
       "path": "./apps/landlord-admin"
+    },
+    {
+      "path": "./apps/client-portal"
+    },
+    {
+      "path": "./apps/sync-worker-e2e"
+    },
+    {
+      "path": "./apps/sync-worker"
     }
   ]
 }

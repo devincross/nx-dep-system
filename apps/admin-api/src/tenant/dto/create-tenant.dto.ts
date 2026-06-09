@@ -23,9 +23,47 @@ export class CreateTenantDto {
   })
   slug!: string;
 
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message:
+      'subdomain must be lowercase alphanumeric with hyphens only (e.g., acme)',
+  })
+  subdomain!: string;
+
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  syncEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  country?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  organizationName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  organizationalUnit?: string;
 
   @IsOptional()
   @IsJSON()

@@ -1,17 +1,33 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { eq, isNull, and, desc } from 'drizzle-orm';
+import { createPublicKey, X509Certificate } from 'crypto';
 import { TenantDb, credentials, Credential, ConnectionData } from '@org/database';
 import { CreateCredentialDto, UpdateCredentialDto } from './dto/index.js';
 import { EncryptionService } from '../encryption/encryption.service.js';
+import { CertificateParserService } from './certificate-parser.service.js';
 
 // Credential with decrypted connectionData
 export interface DecryptedCredential extends Omit<Credential, 'connectionData'> {
   connectionData: ConnectionData;
 }
 
+// NetSuite connection data with certificate fields
+interface NetsuiteConnectionData {
+  auth_type?: 'oauth1' | 'oauth2';
+  private_key?: string;
+  certificate_pem?: string;
+  certificate_expires_at?: string;
+  [key: string]: unknown;
+}
+
 @Injectable()
 export class CredentialsService {
-  constructor(private readonly encryptionService: EncryptionService) {}
+  private readonly logger = new Logger(CredentialsService.name);
+
+  constructor(
+    private readonly encryptionService: EncryptionService,
+    private readonly certificateParserService: CertificateParserService
+  ) {}
 
   /**
    * Decrypt a credential's connectionData
@@ -23,6 +39,75 @@ export class CredentialsService {
         credential.connectionData
       ),
     };
+  }
+
+  /**
+   * Verify that a private key and certificate are a matching pair.
+   * Compares the public key derived from the private key with the
+   * public key embedded in the certificate.
+   */
+  private verifyKeyAndCertMatch(privateKeyPem: string, certificatePem: string): void {
+    try {
+      const pubFromKey = createPublicKey(privateKeyPem).export({ type: 'spki', format: 'der' });
+      const cert = new X509Certificate(certificatePem);
+      const pubFromCert = cert.publicKey.export({ type: 'spki', format: 'der' });
+
+      if (!pubFromKey.equals(pubFromCert)) {
+        throw new BadRequestException(
+          'Private key does not match the certificate. Please generate a new certificate or ensure the correct private key is provided.'
+        );
+      }
+
+      this.logger.log('Private key and certificate match verified');
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error(`Key/cert verification failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new BadRequestException(
+        'Unable to verify private key and certificate. Ensure both are valid PEM format.'
+      );
+    }
+  }
+
+  /**
+   * Process connection data to extract certificate expiration for NetSuite OAuth2
+   */
+  private processConnectionData(
+    type: string,
+    connectionData: ConnectionData
+  ): ConnectionData {
+    if (type !== 'netsuite') {
+      return connectionData;
+    }
+
+    const nsData = connectionData as NetsuiteConnectionData;
+
+    // Only process for OAuth2 with certificate
+    if (nsData.auth_type !== 'oauth2' || !nsData.certificate_pem) {
+      return connectionData;
+    }
+
+    // Verify key and cert match when both are present
+    if (nsData.private_key && nsData.certificate_pem) {
+      this.verifyKeyAndCertMatch(
+        nsData.private_key as string,
+        nsData.certificate_pem as string,
+      );
+    }
+
+    // Parse certificate to get expiration date
+    const expirationDate = this.certificateParserService.getExpirationDate(
+      nsData.certificate_pem
+    );
+
+    if (expirationDate) {
+      this.logger.log(`Certificate expires at: ${expirationDate.toISOString()}`);
+      return {
+        ...connectionData,
+        certificate_expires_at: expirationDate.toISOString(),
+      };
+    }
+
+    return connectionData;
   }
 
   /**
@@ -105,10 +190,14 @@ export class CredentialsService {
   ): Promise<DecryptedCredential> {
     const now = new Date();
 
-    // Encrypt the connectionData before storing
-    const encryptedData = this.encryptionService.encryptJson(
+    // Process connection data (e.g., extract certificate expiration)
+    const processedConnectionData = this.processConnectionData(
+      createCredentialDto.type,
       createCredentialDto.connectionData
     );
+
+    // Encrypt the connectionData before storing
+    const encryptedData = this.encryptionService.encryptJson(processedConnectionData);
 
     const result = await db.insert(credentials).values({
       type: createCredentialDto.type,
@@ -132,13 +221,15 @@ export class CredentialsService {
     id: number,
     updateCredentialDto: UpdateCredentialDto
   ): Promise<DecryptedCredential> {
-    // Ensure credential exists
-    await this.findOne(db, id);
+    // Ensure credential exists and get current data
+    const existing = await this.findOne(db, id);
 
     // Build update object, encrypting connectionData if provided
     const updateData: Record<string, unknown> = {
       updatedAt: new Date(),
     };
+
+    const credType = updateCredentialDto.type ?? existing.type;
 
     if (updateCredentialDto.type !== undefined) {
       updateData['type'] = updateCredentialDto.type;
@@ -147,8 +238,14 @@ export class CredentialsService {
       updateData['status'] = updateCredentialDto.status;
     }
     if (updateCredentialDto.connectionData !== undefined) {
-      updateData['connectionData'] = this.encryptionService.encryptJson(
+      // Process connection data (e.g., extract certificate expiration)
+      const processedConnectionData = this.processConnectionData(
+        credType,
         updateCredentialDto.connectionData
+      );
+
+      updateData['connectionData'] = this.encryptionService.encryptJson(
+        processedConnectionData
       );
     }
 
@@ -191,6 +288,34 @@ export class CredentialsService {
     }
 
     await db.delete(credentials).where(eq(credentials.id, id));
+  }
+
+  /**
+   * Activate a credential and disable all other credentials of the same type.
+   * Used for credential rotation: new credential becomes 'current',
+   * all others of the same type become 'disabled'.
+   */
+  async activate(db: TenantDb, id: number): Promise<DecryptedCredential> {
+    const credential = await this.findOne(db, id);
+
+    // Disable all other credentials of the same type
+    await db
+      .update(credentials)
+      .set({ status: 'disabled', updatedAt: new Date() })
+      .where(
+        and(
+          eq(credentials.type, credential.type),
+          isNull(credentials.deletedAt)
+        )
+      );
+
+    // Set this one as current
+    await db
+      .update(credentials)
+      .set({ status: 'current', updatedAt: new Date() })
+      .where(eq(credentials.id, id));
+
+    return this.findOne(db, id);
   }
 
   /**

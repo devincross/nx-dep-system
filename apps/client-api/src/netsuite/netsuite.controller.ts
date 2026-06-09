@@ -52,6 +52,8 @@ export class NetsuiteController {
 
   /**
    * Call the order script (GET)
+   * Query params: last_modified (optional) - date string for filtering
+   * Auto-included: script, deploy, realm, type='orders'
    */
   @Get('orders')
   async getOrders(
@@ -74,6 +76,8 @@ export class NetsuiteController {
 
   /**
    * Call the account script (GET)
+   * Query params: last_modified (optional) - date string for filtering
+   * Auto-included: script, deploy, realm, type='customers'
    */
   @Get('accounts')
   async getAccounts(
