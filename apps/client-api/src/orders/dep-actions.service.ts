@@ -32,7 +32,7 @@ export class DepActionsService {
     const depItems = items.filter((i) => i.isDep && !i.deletedAt);
     if (depItems.length === 0) throw new BadRequestException('No DEP-eligible devices on this order');
 
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = this.formatDate(new Date());
 
     const request = this.buildBulkEnrollRequest(cred, txnId, [{
@@ -74,7 +74,7 @@ export class DepActionsService {
       : items.filter((i) => i.isDep && !i.deletedAt);
     if (depItems.length === 0) throw new BadRequestException('No devices to return');
 
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = this.formatDate(new Date());
     const returnOrderNum = `${order.depOrderId || order.externalOrderId || order.id}_RE_${Date.now()}`;
 
@@ -98,7 +98,7 @@ export class DepActionsService {
 
   async voidOrder(db: TenantDb, orderId: number) {
     const { order, cred, resolvedCustomerId } = await this.loadOrderAndCreds(db, orderId);
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = this.formatDate(new Date());
 
     const request = this.buildBulkEnrollRequest(cred, txnId, [{
@@ -119,7 +119,7 @@ export class DepActionsService {
     const depItems = items.filter((i) => i.isDep && !i.deletedAt);
     if (depItems.length === 0) throw new BadRequestException('No DEP-eligible devices on this order');
 
-    const txnId = `TXN_${uuidv4()}`;
+    const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = this.formatDate(new Date());
 
     const request = this.buildBulkEnrollRequest(cred, txnId, [{
