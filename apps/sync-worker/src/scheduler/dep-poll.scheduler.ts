@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
 import { eq, and } from 'drizzle-orm';
@@ -23,11 +23,16 @@ export class DepPollScheduler {
   ) {}
 
   /**
-   * Poll Apple DEP for pending transaction statuses every hour.
+   * Poll Apple DEP for pending transaction statuses every 5 minutes.
+   *
+   * Each tenant's poll short-circuits to a single DB query when there are
+   * no pending/in_progress transactions — no Apple API call. So 5-minute
+   * cadence is cheap when idle and gives ~5min average latency after an
+   * enroll.
    */
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron('0 */5 * * * *')
   async handlePoll() {
-    this.logger.log('Polling DEP transaction statuses...');
+    this.logger.debug('DEP poll tick');
 
     try {
       const landlordDb = getLandlordDb();
@@ -56,20 +61,25 @@ export class DepPollScheduler {
         }
       }
 
+      let polledAny = false;
       for (const [, tenant] of tenantMap) {
         try {
-          await this.pollTenant(tenant);
+          const polled = await this.pollTenant(tenant);
+          if (polled) polledAny = true;
         } catch (error) {
           this.logger.error(`Failed to poll DEP for tenant ${tenant.slug}: ${error}`);
         }
       }
 
-      this.logger.log('DEP polling complete');
+      if (polledAny) this.logger.log('DEP polling complete');
     } catch (error) {
       this.logger.error(`DEP polling failed: ${error}`);
     }
   }
 
+  /**
+   * Returns true if Apple was actually called for this tenant.
+   */
   private async pollTenant(tenant: {
     slug: string;
     dbHost: string;
@@ -77,7 +87,7 @@ export class DepPollScheduler {
     dbName: string;
     dbUser: string;
     dbPassword: string;
-  }) {
+  }): Promise<boolean> {
     const connection = await mysql.createConnection({
       host: tenant.dbHost,
       port: tenant.dbPort,
@@ -90,9 +100,9 @@ export class DepPollScheduler {
       const tenantDb = drizzle(connection) as unknown as TenantDb;
       this.depTransactionRepo.setDb(tenantDb);
 
-      // Find pending transactions
+      // Find pending transactions — short-circuit before any Apple call
       const pendingTxns = await this.depTransactionRepo.findPendingTransactions();
-      if (pendingTxns.length === 0) return;
+      if (pendingTxns.length === 0) return false;
 
       this.logger.log(`Found ${pendingTxns.length} pending DEP transactions for ${tenant.slug}`);
 
@@ -100,7 +110,7 @@ export class DepPollScheduler {
       const depCred = await this.getDepCredentials(tenantDb);
       if (!depCred) {
         this.logger.warn(`No DEP credentials for tenant ${tenant.slug}`);
-        return;
+        return false;
       }
 
       this.depAdapter.configure(depCred);
@@ -153,6 +163,7 @@ export class DepPollScheduler {
           );
         }
       }
+      return true;
     } finally {
       await connection.end();
     }
