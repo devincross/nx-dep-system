@@ -240,35 +240,32 @@ export class DepActionsService {
   }
 
   /**
-   * Check the status of the most recent in-flight DEP transaction for an order.
+   * Check the status of a specific DEP transaction by its db id.
    * Calls Apple's check-transaction-status endpoint, which is the only way to
    * see per-device errors after Apple's async ingest of an enroll/return/void.
-   * Same call the cron makes, but on-demand.
+   * Same call the cron makes, but on-demand and scoped to one transaction.
    */
-  async checkTransactionStatus(db: TenantDb, orderId: number) {
-    const { cred } = await this.loadOrderAndCreds(db, orderId);
-
-    // Pick the most recent transaction for this order that has an Apple ID
-    // and isn't already in a terminal state.
-    const candidates = await db
+  async checkTransactionStatus(db: TenantDb, txnDbId: number) {
+    const rows = await db
       .select()
       .from(depTransactions)
-      .where(
-        and(
-          eq(depTransactions.orderId, orderId),
-          inArray(depTransactions.status, ['pending', 'in_progress'] as const),
-        ),
-      );
+      .where(eq(depTransactions.id, txnDbId))
+      .limit(1);
 
-    const txn = candidates
-      .filter((t) => !!t.deviceEnrollmentTransactionId)
-      .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))[0];
-
+    const txn = rows[0];
     if (!txn) {
+      throw new NotFoundException(`DEP transaction ${txnDbId} not found`);
+    }
+    if (!txn.deviceEnrollmentTransactionId) {
       throw new BadRequestException(
-        'No in-flight DEP transaction with a deviceEnrollmentTransactionId on this order',
+        'This transaction has no deviceEnrollmentTransactionId — Apple never accepted the submission (check the response payload for the rejection)',
       );
     }
+    if (!txn.orderId) {
+      throw new BadRequestException('Transaction is not linked to an order');
+    }
+
+    const { cred } = await this.loadOrderAndCreds(db, txn.orderId);
 
     const request = {
       requestContext: { shipTo: cred.shipTo, timeZone: '420', langCode: 'en' },

@@ -115,16 +115,16 @@ export class DepActionsController {
   }
 
   /**
-   * Check the status of the most recent in-flight DEP transaction for this order.
+   * Check the status of a specific DEP transaction by its db id.
    * Calls Apple's check-transaction-status with deviceEnrollmentTransactionId —
    * the only way to see per-device errors after an async ingest.
    */
-  @Post(':id/dep/check-transaction-status')
+  @Post('dep/transactions/:txnId/check-status')
   async checkTransactionStatus(
     @CurrentTenant() tenant: TenantContext,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('txnId', ParseIntPipe) txnId: number,
   ) {
-    return this.depActionsService.checkTransactionStatus(tenant.db, id);
+    return this.depActionsService.checkTransactionStatus(tenant.db, txnId);
   }
 
   /**
