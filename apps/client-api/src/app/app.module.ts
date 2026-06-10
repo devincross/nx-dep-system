@@ -7,6 +7,7 @@ import { AuthModule } from '../auth/auth.module.js';
 import { CredentialsModule } from '../credentials/credentials.module.js';
 import { EncryptionModule } from '../encryption/encryption.module.js';
 import { OrdersModule } from '../orders/orders.module.js';
+import { AccountsModule } from '../accounts/accounts.module.js';
 import { NetsuiteModule } from '../netsuite/netsuite.module.js';
 import { SyncStatusModule } from '../sync-status/sync-status.module.js';
 import { ZohoModule } from '../zoho/zoho.module.js';
@@ -19,6 +20,7 @@ import { ZohoModule } from '../zoho/zoho.module.js';
     AuthModule,
     CredentialsModule,
     OrdersModule,
+    AccountsModule,
     NetsuiteModule,
     ZohoModule,
     SyncStatusModule,

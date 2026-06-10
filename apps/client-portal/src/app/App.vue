@@ -13,6 +13,7 @@ const user = computed(() => authStore.user);
 const menuItems = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
   { title: 'Orders', icon: 'mdi-package-variant-closed', to: '/orders' },
+  { title: 'Accounts', icon: 'mdi-account-multiple', to: '/accounts' },
   { title: 'Credentials', icon: 'mdi-key-variant', to: '/credentials' },
   { title: 'NetSuite', icon: 'mdi-cloud-sync', to: '/netsuite' },
 ];

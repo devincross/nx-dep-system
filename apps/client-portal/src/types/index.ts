@@ -52,6 +52,23 @@ export interface UpdateCredentialDto {
   connectionData?: Record<string, unknown>;
 }
 
+// Account types
+export interface Account {
+  id: number;
+  externalAccountId?: string;
+  depAccountId?: string;
+  name?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncAllAccountsResult {
+  fetched: number;
+  created: number;
+  updated: number;
+  skipped: number;
+}
+
 // Order types
 export type OrderStatus = 'waiting' | 'pending' | 'submitted' | 'complete' | 'error' | 'changes';
 export type OrderItemDepStatus = 'pending' | 'submitted' | 'complete' | 'error' | 'changes';
