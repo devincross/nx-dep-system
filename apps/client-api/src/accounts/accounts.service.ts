@@ -58,20 +58,14 @@ export class AccountsService {
     this.logger.log(`syncAll: fetched ${list.length} accounts from NetSuite`);
 
     for (const row of list) {
-      const externalAccountId = this.pickString(row, ['id', 'internalid', 'entityid', 'External_Account_ID']);
+      const externalAccountId = this.str(row['account_id']);
       if (!externalAccountId) {
         result.skipped++;
         continue;
       }
 
-      const name = this.pickString(row, ['companyname', 'entityid', 'name']);
-      const depAccountId = this.pickString(row, [
-        'dep_id',
-        'custentity_dep_account_id',
-        'custentity_apple_dep_id',
-        'depAccountId',
-        'DEP_Account_ID',
-      ]);
+      const name = this.str(row['name']);
+      const depAccountId = this.str(row['dep_id']);
 
       const now = new Date();
       const insertResult = await db
@@ -98,12 +92,12 @@ export class AccountsService {
     return result;
   }
 
-  private pickString(row: Record<string, unknown>, keys: string[]): string | undefined {
-    for (const k of keys) {
-      const v = row[k];
-      if (typeof v === 'string' && v.trim().length > 0) return v.trim();
-      if (typeof v === 'number') return String(v);
+  private str(v: unknown): string | undefined {
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof v === 'number') return String(v);
     return undefined;
   }
 }
