@@ -66,6 +66,7 @@ export class AccountsService {
 
       const name = this.pickString(row, ['companyname', 'entityid', 'name']);
       const depAccountId = this.pickString(row, [
+        'dep_id',
         'custentity_dep_account_id',
         'custentity_apple_dep_id',
         'depAccountId',
