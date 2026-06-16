@@ -138,6 +138,41 @@ export class NetsuiteService {
   }
 
   /**
+   * Dump the full outbound request (method, url, headers, body) for debugging
+   * auth errors. Gated behind NETSUITE_DEBUG=true so secrets (the full
+   * Authorization header) are never logged in normal operation.
+   *
+   * When enabled, the output can be replayed directly against NetSuite
+   * (e.g. via curl/Postman) to isolate signature vs. credential issues.
+   */
+  private logRequestDebug(
+    authType: string,
+    method: string,
+    url: string,
+    headers: Record<string, string>,
+    body?: string,
+  ): void {
+    if (process.env.NETSUITE_DEBUG !== 'true') {
+      return;
+    }
+
+    this.logger.warn(
+      `[NETSUITE_DEBUG] outbound request — secrets included, do not leave NETSUITE_DEBUG enabled:\n` +
+        JSON.stringify(
+          {
+            authType,
+            method,
+            url,
+            headers,
+            body: body ?? null,
+          },
+          null,
+          2,
+        ),
+    );
+  }
+
+  /**
    * Build full RESTlet URL with script and deploy parameters
    */
   private buildRestletUrl(
@@ -231,6 +266,8 @@ export class NetsuiteService {
       this.logger.debug(`[OAuth1] body=${fetchOptions.body}`);
     }
 
+    this.logRequestDebug('oauth1', method, restletUrl, headers, fetchOptions.body as string | undefined);
+
     try {
       const response = await fetch(restletUrl, fetchOptions);
 
@@ -292,6 +329,7 @@ export class NetsuiteService {
     }
 
     this.logger.debug(`Making OAuth 2.0 request to: ${restletUrl}`);
+    this.logRequestDebug('oauth2', method, restletUrl, headers, fetchOptions.body as string | undefined);
     const response = await fetch(restletUrl, fetchOptions);
 
     if (!response.ok) {
