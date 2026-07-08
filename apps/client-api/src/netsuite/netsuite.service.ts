@@ -203,7 +203,13 @@ export class NetsuiteService {
     restletUrl: string,
     data?: Record<string, unknown>
   ): Promise<NetsuiteResponse<T>> {
-    const realm = connectionData.netsuite_realm || connectionData.netsuite_account;
+    // NetSuite requires the OAuth realm to be the account ID in canonical
+    // form: uppercase with underscores (e.g. 4325477_SB1). Stored values
+    // sometimes hold the URL/domain form (4325477-sb1), which NetSuite rejects
+    // with INVALID_LOGIN_ATTEMPT. Normalize defensively; idempotent for values
+    // already in canonical form and for production IDs with no suffix.
+    const rawRealm = connectionData.netsuite_realm || connectionData.netsuite_account;
+    const realm = rawRealm?.toUpperCase().replace(/-/g, '_');
     this.logger.log(`[OAuth1] ${method} ${restletUrl}`);
     this.logger.debug(`[OAuth1] realm=${realm}, account=${connectionData.netsuite_account}`);
     this.logger.debug(`[OAuth1] consumer_key=${connectionData.netsuite_consumer_key?.slice(0, 8)}...`);

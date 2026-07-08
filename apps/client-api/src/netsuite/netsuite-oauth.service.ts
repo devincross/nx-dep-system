@@ -128,8 +128,11 @@ export class NetsuiteOAuthService {
    * Get the NetSuite OAuth token endpoint URL
    */
   private getTokenUrl(accountId: string): string {
-    // Convert account ID format: 4325477_SB1 -> 4325477-sb1
-    const normalizedAccount = accountId.toLowerCase().replace('_', '-');
+    // NetSuite host uses the domain form of the account ID: lowercase with
+    // hyphens (e.g. 4325477_SB1 -> 4325477-sb1). Normalize defensively so a
+    // stored account ID in either form resolves correctly; global replace
+    // covers IDs with more than one underscore.
+    const normalizedAccount = accountId.toLowerCase().replace(/_/g, '-');
     return `https://${normalizedAccount}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
   }
 
