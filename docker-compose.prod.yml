@@ -51,9 +51,6 @@ services:
       - LANDLORD_DB_PASSWORD=${LANDLORD_DB_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEYS=${ENCRYPTION_KEYS}
-      # TEMP: dumps full NetSuite requests incl. Authorization header at warn
-      # level for auth debugging. Logs secrets — remove once diagnosed.
-      - NETSUITE_DEBUG=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
