@@ -224,7 +224,7 @@ async function handleDelete() {
       <v-card-title>
         <v-row>
           <v-col cols="12" sm="4">
-            <v-text-field v-model="search" prepend-icon="mdi-magnify" label="Search" single-line hide-details clearable></v-text-field>
+            <v-text-field v-model="search" prepend-icon="mdi-magnify" label="Search orders, PO, or serial number" single-line hide-details clearable></v-text-field>
           </v-col>
           <v-col cols="12" sm="4">
             <v-select

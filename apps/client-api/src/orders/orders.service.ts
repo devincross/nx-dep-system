@@ -69,6 +69,9 @@ export class OrdersService {
     const search = opts.search?.trim();
     if (search) {
       const pattern = `%${search}%`;
+      // Serials are stored without the leading 'S' — normalize the search
+      // term the same way the import does so "S12345" finds "12345"
+      const serialPattern = `%${normalizeSerial(search)}%`;
       conditions.push(
         or(
           like(orders.orderId, pattern),
@@ -76,6 +79,7 @@ export class OrdersService {
           like(orders.depOrderId, pattern),
           like(orders.po, pattern),
           like(orders.source, pattern),
+          sql`EXISTS (SELECT 1 FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id} AND ${orderItems.deletedAt} IS NULL AND ${orderItems.serialNumber} LIKE ${serialPattern})`,
         ) as SQL,
       );
     }
