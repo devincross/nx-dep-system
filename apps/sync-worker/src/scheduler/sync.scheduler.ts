@@ -19,6 +19,7 @@ import { AccountRepository } from '../infrastructure/repositories/account.reposi
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { SyncStatusRepository } from '../infrastructure/repositories/sync-status.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
+import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 
 interface TenantMetadata {
   connectionType?: 'netsuite' | 'zoho';
@@ -191,10 +192,9 @@ export class SyncScheduler implements OnModuleInit {
 
     if (results.length === 0) return null;
 
-    // Note: connectionData needs decryption in real implementation
     return {
       ...results[0],
-      connectionData: JSON.parse(results[0].connectionData) as Record<string, unknown>,
+      connectionData: parseConnectionData(results[0].connectionData),
     };
   }
 

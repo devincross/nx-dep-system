@@ -15,6 +15,7 @@ import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
+import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 import { AccountRepository } from '../infrastructure/repositories/account.repository.js';
 
 @Injectable()
@@ -141,8 +142,9 @@ export class DepPushScheduler {
 
     let data: Record<string, unknown>;
     try {
-      data = JSON.parse(results[0].connectionData) as Record<string, unknown>;
-    } catch {
+      data = parseConnectionData(results[0].connectionData);
+    } catch (error) {
+      this.logger.error(`Failed to parse DEP credentials: ${error}`);
       return null;
     }
 
