@@ -102,39 +102,6 @@ describe('AuthService', () => {
     });
   });
 
-  describe('register', () => {
-    it('should create a new user', async () => {
-      mockDb.where
-        .mockResolvedValueOnce([]) // email check
-        .mockResolvedValueOnce([mockUser]); // findById after insert
-
-      const registerDto = {
-        email: 'john@example.com',
-        password: 'password123',
-        firstName: 'John',
-        lastName: 'Doe',
-      };
-
-      const result = await service.register(mockDb, registerDto);
-
-      expect(result).toEqual(mockSafeUser);
-      expect(mockDb.insert).toHaveBeenCalled();
-    });
-
-    it('should throw ConflictException when email exists', async () => {
-      mockDb.where.mockResolvedValue([mockUser]);
-
-      const registerDto = {
-        email: 'john@example.com',
-        password: 'password123',
-      };
-
-      await expect(service.register(mockDb, registerDto)).rejects.toThrow(
-        ConflictException
-      );
-    });
-  });
-
   describe('validateUser', () => {
     it('should return user without passwordHash when credentials are valid', async () => {
       const hashedPassword = crypto

@@ -13,14 +13,16 @@ import {
 } from '@nestjs/common';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
-import { JwtAuthGuard } from '../auth/guards/index.js';
+import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
+import { Roles } from '../auth/decorators/index.js';
 import { CredentialsService } from './credentials.service.js';
 import { CertificateGeneratorService } from './certificate-generator.service.js';
 import { CsrGeneratorService } from './csr-generator.service.js';
 import { CreateCredentialDto, UpdateCredentialDto } from './dto/index.js';
 
 @Controller('credentials')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class CredentialsController {
   constructor(
     private readonly credentialsService: CredentialsService,

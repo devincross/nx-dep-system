@@ -1,9 +1,12 @@
 // User types
+export type UserRole = 'admin' | 'user';
+
 export interface User {
   id: string;
   email: string;
   firstName?: string;
   lastName?: string;
+  role: UserRole;
   isActive: boolean;
   lastLoginAt?: string;
   createdAt: string;
@@ -15,9 +18,26 @@ export interface LoginDto {
   password: string;
 }
 
-export interface RegisterDto {
+export interface CreateUserDto {
   email: string;
   password: string;
+  role?: UserRole;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface UpdateUserDto {
+  email?: string;
+  password?: string;
+  role?: UserRole;
+  firstName?: string;
+  lastName?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateMeDto {
+  email?: string;
+  password?: string;
   firstName?: string;
   lastName?: string;
 }
