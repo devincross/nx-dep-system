@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import { depTransactions } from '@org/database';
-import { OrderChangeRepositoryPort, OrderRepositoryPort } from '../domain/ports/repository.port.js';
+import { AccountRepositoryPort, OrderChangeRepositoryPort, OrderRepositoryPort } from '../domain/ports/repository.port.js';
 import { OrderChangeEntity, OrderItemChangeEntity } from '../domain/entities/index.js';
 import { DepSyncAdapter } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
@@ -40,7 +40,7 @@ export class DepPushChangesUseCase {
     orderRepo: OrderRepositoryPort,
     depAdapter: DepSyncAdapter,
     txnRepo: DepTransactionRepository,
-    depConfig: { customerId: string },
+    accountRepo: AccountRepositoryPort,
   ): Promise<DepPushResult> {
     const result: DepPushResult = {
       totalOrders: 0,
@@ -77,6 +77,18 @@ export class DepPushChangesUseCase {
           continue;
         }
 
+        // Resolve the Apple org ID from the order's account. Never fall back
+        // to reseller-side IDs — Apple rejects them with DEP-ERR-OR-4102.
+        const account = order.accountId ? await accountRepo.findById(order.accountId) : null;
+        const customerId = account?.depAccountId;
+        if (!customerId) {
+          this.logger.warn(
+            `Order ${orderId} account has no DEP account ID (Apple org ID) — skipping until accounts sync provides one`,
+          );
+          result.skipped++;
+          continue; // leave changes unsynced so this retries once the account is fixed
+        }
+
         const orderChange = changes.orderChanges[0];
         const addedItems = changes.itemChanges.filter((i) => i.changeType === 'added');
         const removedItems = changes.itemChanges.filter((i) => i.changeType === 'removed');
@@ -84,7 +96,7 @@ export class DepPushChangesUseCase {
         // Determine which DEP operations to perform
         if (orderChange?.changeType === 'deleted') {
           // Order deleted → Void (VD)
-          await this.submitVoid(depAdapter, txnRepo, order, depConfig.customerId);
+          await this.submitVoid(depAdapter, txnRepo, order, customerId);
           result.submitted++;
           await this.markSynced(changeRepo, changes);
         } else if (orderChange?.changeType === 'created') {
@@ -95,7 +107,7 @@ export class DepPushChangesUseCase {
             await this.markSynced(changeRepo, changes);
             continue;
           }
-          await this.submitEnroll(depAdapter, txnRepo, order, depItems, depConfig.customerId);
+          await this.submitEnroll(depAdapter, txnRepo, order, depItems, customerId);
           result.submitted++;
           await this.markSynced(changeRepo, changes);
         } else if (orderChange?.changeType === 'updated') {
@@ -103,9 +115,9 @@ export class DepPushChangesUseCase {
           const depItems = order.items.filter((i) => i.isDep);
           if (depItems.length === 0) {
             // All devices removed — void instead
-            await this.submitVoid(depAdapter, txnRepo, order, depConfig.customerId);
+            await this.submitVoid(depAdapter, txnRepo, order, customerId);
           } else {
-            await this.submitOverride(depAdapter, txnRepo, order, depItems, depConfig.customerId);
+            await this.submitOverride(depAdapter, txnRepo, order, depItems, customerId);
           }
           result.submitted++;
           await this.markSynced(changeRepo, changes);
@@ -115,7 +127,7 @@ export class DepPushChangesUseCase {
 
           // Handle removed items → Return (RE)
           if (removedItems.length > 0) {
-            await this.submitReturn(depAdapter, txnRepo, order, removedItems, depConfig.customerId);
+            await this.submitReturn(depAdapter, txnRepo, order, removedItems, customerId);
             didSubmit = true;
           }
 
@@ -127,7 +139,7 @@ export class DepPushChangesUseCase {
                 return item?.isDep;
               });
             if (devices.length > 0) {
-              await this.submitAddDevices(depAdapter, txnRepo, order, devices, depConfig.customerId);
+              await this.submitAddDevices(depAdapter, txnRepo, order, devices, customerId);
               didSubmit = true;
             }
           }

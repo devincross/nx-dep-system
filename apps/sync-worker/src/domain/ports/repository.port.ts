@@ -32,6 +32,11 @@ export interface SyncStatusEntity {
  */
 export interface AccountRepositoryPort {
   /**
+   * Find account by internal ID
+   */
+  findById(id: number): Promise<PersistedAccountEntity | null>;
+
+  /**
    * Find account by external ID
    */
   findByExternalId(externalAccountId: string): Promise<PersistedAccountEntity | null>;
