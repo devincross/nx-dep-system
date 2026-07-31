@@ -279,13 +279,18 @@ export class DepActionsService {
     ) as any;
 
     // Mirror the cron's status mapping
-    let status: 'pending' | 'in_progress' | 'complete' | 'error';
+    let status: 'pending' | 'in_progress' | 'complete' | 'error' | 'posted_with_errors';
     let errorCode: string | null = null;
     let errorMessage: string | null = null;
     let completedAt: Date | null = null;
 
     if (response.statusCode === 'COMPLETE') {
       status = 'complete';
+      completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
+    } else if (response.statusCode === 'COMPLETE_WITH_ERRORS') {
+      status = 'posted_with_errors';
+      errorCode = response.errorCode ?? null;
+      errorMessage = this.extractAnyErrorMessage(response);
       completedAt = response.completedOn ? new Date(response.completedOn) : new Date();
     } else if (response.statusCode === 'ERROR') {
       status = 'error';
@@ -319,23 +324,16 @@ export class DepActionsService {
       })
       .where(eq(depTransactions.id, txn.id));
 
-    // Surface the failure on the order itself so it doesn't sit in
-    // 'submitted' forever — flag the order and the failing devices.
-    if (status === 'error') {
-      await db.update(orders)
-        .set({ status: 'error', updatedAt: new Date() })
-        .where(eq(orders.id, txn.orderId));
-
-      const failingSerials = this.extractFailingDeviceIds(response);
-      if (failingSerials.length > 0) {
-        await db.update(orderItems)
-          .set({ depStatus: 'error', updatedAt: new Date() })
-          .where(and(
-            eq(orderItems.orderId, txn.orderId),
-            inArray(orderItems.serialNumber, failingSerials),
-          ));
-      }
-    }
+    // Propagate the outcome to the order and its devices so the order
+    // doesn't sit in 'submitted' after Apple has resolved the transaction
+    await this.applyCheckOutcomeToOrder(
+      db,
+      txn.orderId,
+      txn.orderType,
+      txn.requestPayload,
+      status,
+      response,
+    );
 
     return {
       transactionId: txn.transactionId,
@@ -345,6 +343,121 @@ export class DepActionsService {
       errorMessage,
       response,
     };
+  }
+
+  /**
+   * Reflect a resolved transaction on the order and its devices:
+   * - error: order → error, failing devices → error
+   * - complete (OR/OV): enrolled devices → complete; order → complete
+   *   once every DEP device on the order is complete
+   * - posted_with_errors: enrolled devices → complete, failing → error,
+   *   order → error so it surfaces for manual attention
+   * RE/VD completions only resolve the transaction, not device statuses.
+   */
+  private async applyCheckOutcomeToOrder(
+    db: TenantDb,
+    orderId: number,
+    orderType: string,
+    requestPayload: string | null,
+    status: 'pending' | 'in_progress' | 'complete' | 'error' | 'posted_with_errors',
+    response: any,
+  ): Promise<void> {
+    if (status === 'error') {
+      await db.update(orders)
+        .set({ status: 'error', updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+
+      const failingSerials = this.extractFailingDeviceIds(response);
+      if (failingSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'error', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, failingSerials),
+          ));
+      }
+      return;
+    }
+
+    if (status !== 'complete' && status !== 'posted_with_errors') return;
+
+    // Enrollment transactions mark their devices complete; returns/voids don't
+    if (orderType === 'OR' || orderType === 'OV') {
+      let completedSerials = this.extractCompletedDeviceIds(response);
+      if (completedSerials.length === 0 && status === 'complete') {
+        // Apple sometimes returns no device detail — fall back to the
+        // devices we submitted in the original request
+        completedSerials = this.deviceIdsFromRequestPayload(requestPayload);
+      }
+      if (completedSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'complete', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, completedSerials),
+          ));
+      }
+    }
+
+    if (status === 'posted_with_errors') {
+      const failingSerials = this.extractFailingDeviceIds(response);
+      if (failingSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'error', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, failingSerials),
+          ));
+      }
+      await db.update(orders)
+        .set({ status: 'error', updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+      return;
+    }
+
+    // Fully complete enrollment: order → complete once every DEP device is
+    if (orderType === 'OR' || orderType === 'OV') {
+      const items = await db.select().from(orderItems)
+        .where(and(eq(orderItems.orderId, orderId), isNull(orderItems.deletedAt)));
+      const depItems = items.filter((i) => i.isDep);
+      if (depItems.length > 0 && depItems.every((i) => i.depStatus === 'complete')) {
+        await db.update(orders)
+          .set({ status: 'complete', updatedAt: new Date() })
+          .where(eq(orders.id, orderId));
+      }
+    }
+  }
+
+  private extractCompletedDeviceIds(response: any): string[] {
+    const serials: string[] = [];
+    for (const order of response.orders ?? []) {
+      for (const delivery of order.deliveries ?? []) {
+        for (const device of delivery.devices ?? []) {
+          if (device.deviceId && device.devicePostStatus === 'COMPLETE') {
+            serials.push(device.deviceId);
+          }
+        }
+      }
+    }
+    return serials;
+  }
+
+  private deviceIdsFromRequestPayload(requestPayload: string | null): string[] {
+    if (!requestPayload) return [];
+    try {
+      const req = JSON.parse(requestPayload);
+      const serials: string[] = [];
+      for (const order of req.orders ?? []) {
+        for (const delivery of order.deliveries ?? []) {
+          for (const device of delivery.devices ?? []) {
+            if (device.deviceId) serials.push(device.deviceId);
+          }
+        }
+      }
+      return serials;
+    } catch {
+      return [];
+    }
   }
 
   private extractFailingDeviceIds(response: any): string[] {
