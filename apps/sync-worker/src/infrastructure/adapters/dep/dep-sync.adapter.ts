@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as https from 'https';
+import * as zlib from 'zlib';
 import {
   DepPayloadBuilder,
   BulkEnrollRequest,
@@ -205,7 +206,25 @@ export class DepSyncAdapter {
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          const responseBody = Buffer.concat(chunks).toString('utf-8');
+          const raw = Buffer.concat(chunks);
+
+          // We ask for gzip/deflate — decompress before parsing
+          let decoded: Buffer;
+          try {
+            const encoding = res.headers['content-encoding'];
+            if (encoding === 'gzip') {
+              decoded = zlib.gunzipSync(raw);
+            } else if (encoding === 'deflate') {
+              decoded = zlib.inflateSync(raw);
+            } else {
+              decoded = raw;
+            }
+          } catch (err) {
+            reject(new Error(`Failed to decompress DEP response: ${err}`));
+            return;
+          }
+
+          const responseBody = decoded.toString('utf-8');
           try {
             const parsed = JSON.parse(responseBody) as T;
             resolve(parsed);
