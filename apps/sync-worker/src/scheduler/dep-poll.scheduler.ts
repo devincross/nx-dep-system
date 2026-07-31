@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import {
   getLandlordDb,
   tenants,
   domains,
   credentials,
+  orders,
+  orderItems,
   TenantDb,
 } from '@org/database';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
@@ -138,6 +140,7 @@ export class DepPollScheduler {
               errorMessage: errorMsg,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
+            await this.markOrderErrored(tenantDb, txn.orderId, response);
             this.logger.warn(`DEP transaction ${txn.transactionId} errored: ${errorMsg}`);
           } else if (response.checkTransactionErrorResponse) {
             const errors = response.checkTransactionErrorResponse;
@@ -154,6 +157,7 @@ export class DepPollScheduler {
                 errorCode: errors[0].errorCode,
                 errorMessage: errorMsg,
               });
+              await this.markOrderErrored(tenantDb, txn.orderId, response);
             }
           }
           // else: still in progress, leave as-is
@@ -166,6 +170,41 @@ export class DepPollScheduler {
       return true;
     } finally {
       await connection.end();
+    }
+  }
+
+  /**
+   * Flag the order (and its failing devices) so a failed transaction is
+   * visible on the order list instead of leaving it stuck in 'submitted'.
+   */
+  private async markOrderErrored(
+    db: TenantDb,
+    orderId: number | null | undefined,
+    response: any,
+  ): Promise<void> {
+    if (!orderId) return;
+
+    await db.update(orders)
+      .set({ status: 'error', updatedAt: new Date() })
+      .where(eq(orders.id, orderId));
+
+    const failingSerials: string[] = [];
+    for (const order of response.orders ?? []) {
+      for (const delivery of order.deliveries ?? []) {
+        for (const device of delivery.devices ?? []) {
+          if (device.deviceId && device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
+            failingSerials.push(device.deviceId);
+          }
+        }
+      }
+    }
+    if (failingSerials.length > 0) {
+      await db.update(orderItems)
+        .set({ depStatus: 'error', updatedAt: new Date() })
+        .where(and(
+          eq(orderItems.orderId, orderId),
+          inArray(orderItems.serialNumber, failingSerials),
+        ));
     }
   }
 

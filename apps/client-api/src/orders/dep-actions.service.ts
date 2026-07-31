@@ -319,6 +319,24 @@ export class DepActionsService {
       })
       .where(eq(depTransactions.id, txn.id));
 
+    // Surface the failure on the order itself so it doesn't sit in
+    // 'submitted' forever — flag the order and the failing devices.
+    if (status === 'error') {
+      await db.update(orders)
+        .set({ status: 'error', updatedAt: new Date() })
+        .where(eq(orders.id, txn.orderId));
+
+      const failingSerials = this.extractFailingDeviceIds(response);
+      if (failingSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'error', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, txn.orderId),
+            inArray(orderItems.serialNumber, failingSerials),
+          ));
+      }
+    }
+
     return {
       transactionId: txn.transactionId,
       deviceEnrollmentTransactionId: txn.deviceEnrollmentTransactionId,
@@ -327,6 +345,20 @@ export class DepActionsService {
       errorMessage,
       response,
     };
+  }
+
+  private extractFailingDeviceIds(response: any): string[] {
+    const serials: string[] = [];
+    for (const order of response.orders ?? []) {
+      for (const delivery of order.deliveries ?? []) {
+        for (const device of delivery.devices ?? []) {
+          if (device.deviceId && device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
+            serials.push(device.deviceId);
+          }
+        }
+      }
+    }
+    return serials;
   }
 
   private extractAnyErrorMessage(response: any): string {
