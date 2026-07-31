@@ -33,6 +33,7 @@ const headers = [
   { title: 'PO', key: 'po', sortable: true },
   { title: 'Source', key: 'source', sortable: true },
   { title: 'DEP', key: 'depOrderId', sortable: true },
+  { title: 'Created', key: 'createdAt', sortable: true },
   { title: 'Actions', key: 'actions', sortable: false, width: 280 },
 ];
 
@@ -230,7 +231,8 @@ onMounted(() => {
           <span v-else class="text-caption text-grey">--</span>
         </template>
         <template v-slot:item.createdAt="{ item }">
-          {{ new Date(item.createdAt).toLocaleDateString() }}
+          <span v-if="item.createdAt">{{ new Date(item.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }}</span>
+          <span v-else class="text-caption text-grey">--</span>
         </template>
         <template v-slot:item.actions="{ item }">
           <v-btn icon size="small" :to="`/orders/${item.id}`" color="info"><v-icon>mdi-eye</v-icon></v-btn>
