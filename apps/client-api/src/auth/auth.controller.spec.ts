@@ -12,6 +12,7 @@ describe('AuthController', () => {
     firstName: 'John',
     lastName: 'Doe',
     email: 'john@example.com',
+    role: 'admin' as const,
     isActive: true,
     lastLoginAt: null,
     createdAt: new Date(),
