@@ -73,14 +73,20 @@ export const credentials = mysqlTable('credentials', {
 });
 
 // Accounts table - customer accounts
-export const accounts = mysqlTable('accounts', {
-  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
-  externalAccountId: varchar('external_account_id', { length: 255 }),
-  depAccountId: varchar('dep_account_id', { length: 255 }), // DEP enrollment account ID
-  name: varchar('name', { length: 255 }),
-  createdAt: timestamp('created_at'),
-  updatedAt: timestamp('updated_at'),
-});
+export const accounts = mysqlTable(
+  'accounts',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    externalAccountId: varchar('external_account_id', { length: 255 }),
+    depAccountId: varchar('dep_account_id', { length: 255 }), // DEP enrollment account ID
+    name: varchar('name', { length: 255 }),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('accounts_external_account_id_unique').on(table.externalAccountId),
+  ],
+);
 
 // Sync status enum
 export const syncStatusEnum = ['success', 'error', 'running', 'pending'] as const;

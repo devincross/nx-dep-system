@@ -15,6 +15,13 @@
       "when": 1776288833040,
       "tag": "0001_special_johnny_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1785463842320,
+      "tag": "0002_illegal_magma",
+      "breakpoints": true
     }
   ]
 }
