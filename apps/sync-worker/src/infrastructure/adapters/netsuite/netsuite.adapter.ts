@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import {
   DataSourcePort,
@@ -199,11 +200,78 @@ export class NetsuiteAdapter implements DataSourcePort {
     });
   }
 
+  /**
+   * OAuth 1.0a (TBA) signing — mirrors the working client-api implementation.
+   */
   private getOAuth1Headers(method: string, url: string): Record<string, string> {
-    // OAuth 1.0a implementation would go here
-    // For now, return empty - full implementation in netsuite-api-client
-    this.logger.warn('OAuth 1.0a not fully implemented in adapter');
-    return {};
+    // NetSuite requires the OAuth realm to be the account ID in canonical
+    // form: uppercase with underscores (e.g. 4325477_SB1). Stored values
+    // sometimes hold the URL/domain form (4325477-sb1), which NetSuite
+    // rejects with INVALID_LOGIN_ATTEMPT. Normalize defensively.
+    const rawRealm = this.config!.realm || this.config!.account;
+    const realm = rawRealm.toUpperCase().replace(/-/g, '_');
+
+    const consumerKey = this.config!.consumerKey!;
+    const consumerSecret = this.config!.consumerSecret!;
+    const token = this.config!.token!;
+    const tokenSecret = this.config!.tokenSecret!;
+
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(16).toString('hex');
+
+    const urlObj = new URL(url);
+    const baseUrl = `${urlObj.origin}${urlObj.pathname}`;
+
+    // Collect all params (query + oauth)
+    const params: [string, string][] = [];
+    urlObj.searchParams.forEach((value, key) => {
+      params.push([key, value]);
+    });
+
+    params.push(['oauth_consumer_key', consumerKey]);
+    params.push(['oauth_nonce', nonce]);
+    params.push(['oauth_signature_method', 'HMAC-SHA256']);
+    params.push(['oauth_timestamp', timestamp]);
+    params.push(['oauth_token', token]);
+    params.push(['oauth_version', '1.0']);
+
+    params.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+
+    const paramString = params
+      .map(([k, v]) => `${this.percentEncode(k)}=${this.percentEncode(v)}`)
+      .join('&');
+
+    const signatureBase = `${method.toUpperCase()}&${this.percentEncode(baseUrl)}&${this.percentEncode(paramString)}`;
+    const signingKey = `${this.percentEncode(consumerSecret)}&${this.percentEncode(tokenSecret)}`;
+    const signature = crypto
+      .createHmac('sha256', signingKey)
+      .update(signatureBase)
+      .digest('base64');
+
+    const headerParts = [
+      `realm="${this.percentEncode(realm)}"`,
+      `oauth_consumer_key="${this.percentEncode(consumerKey)}"`,
+      `oauth_nonce="${this.percentEncode(nonce)}"`,
+      `oauth_signature="${this.percentEncode(signature)}"`,
+      `oauth_signature_method="HMAC-SHA256"`,
+      `oauth_timestamp="${timestamp}"`,
+      `oauth_token="${this.percentEncode(token)}"`,
+      `oauth_version="1.0"`,
+    ];
+
+    return { Authorization: `OAuth ${headerParts.join(', ')}` };
+  }
+
+  /**
+   * Percent-encode per OAuth 1.0a spec (RFC 5849)
+   */
+  private percentEncode(str: string): string {
+    return encodeURIComponent(str)
+      .replace(/!/g, '%21')
+      .replace(/\*/g, '%2A')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29');
   }
 }
 
