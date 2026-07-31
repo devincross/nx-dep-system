@@ -12,6 +12,7 @@ describe('AuthController', () => {
     firstName: 'John',
     lastName: 'Doe',
     email: 'john@example.com',
+    role: 'admin' as const,
     isActive: true,
     lastLoginAt: null,
     createdAt: new Date(),
@@ -58,7 +59,6 @@ describe('AuthController', () => {
 
   const mockAuthService = {
     findById: jest.fn().mockResolvedValue(mockUser),
-    register: jest.fn().mockResolvedValue(mockUser),
     login: jest.fn().mockResolvedValue(mockLoginResponse),
     updateLastLogin: jest.fn().mockResolvedValue(undefined),
     jwtService: {
@@ -103,26 +103,6 @@ describe('AuthController', () => {
       expect(service.updateLastLogin).toHaveBeenCalledWith(
         mockTenantContext.db,
         mockUser.id
-      );
-    });
-  });
-
-  describe('register', () => {
-    it('should register a new user and return token', async () => {
-      const registerDto = {
-        email: 'john@example.com',
-        password: 'password123',
-        firstName: 'John',
-        lastName: 'Doe',
-      };
-
-      const result = await controller.register(mockTenantContext, registerDto);
-
-      expect(result.user).toEqual(mockUser);
-      expect(result.access_token).toBe('mock-jwt-token');
-      expect(service.register).toHaveBeenCalledWith(
-        mockTenantContext.db,
-        registerDto
       );
     });
   });

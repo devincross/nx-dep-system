@@ -60,7 +60,6 @@ async function handleLogin() {
             </v-form>
           </v-card-text>
           <v-card-actions>
-            <v-btn variant="text" :to="{ name: 'register' }">Register</v-btn>
             <v-spacer></v-spacer>
             <v-btn color="primary" :loading="loading" @click="handleLogin">Login</v-btn>
           </v-card-actions>

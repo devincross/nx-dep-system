@@ -10,12 +10,6 @@ const router = createRouter({
       meta: { requiresAuth: false },
     },
     {
-      path: '/register',
-      name: 'register',
-      component: () => import('../views/RegisterView.vue'),
-      meta: { requiresAuth: false },
-    },
-    {
       path: '/',
       name: 'dashboard',
       component: () => import('../views/DashboardView.vue'),
@@ -59,37 +53,51 @@ const router = createRouter({
       component: () => import('../views/accounts/AccountsListView.vue'),
       meta: { requiresAuth: true },
     },
-    // Credentials routes
+    // Credentials routes (admin only)
     {
       path: '/credentials',
       name: 'credentials',
       component: () => import('../views/credentials/CredentialsListView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
       path: '/credentials/create',
       name: 'credentials-create',
       component: () => import('../views/credentials/CredentialFormView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
       path: '/credentials/:id/edit',
       name: 'credentials-edit',
       component: () => import('../views/credentials/CredentialFormView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
-    // Zoho OAuth callback
+    // Zoho OAuth callback (admin only)
     {
       path: '/zoho/callback',
       name: 'zoho-callback',
       component: () => import('../views/ZohoCallbackView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
-    // NetSuite route
+    // NetSuite route (admin only)
     {
       path: '/netsuite',
       name: 'netsuite',
       component: () => import('../views/NetsuiteView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    // User management (admin only)
+    {
+      path: '/users',
+      name: 'users',
+      component: () => import('../views/users/UsersListView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    // Own profile (any authenticated user)
+    {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('../views/ProfileView.vue'),
       meta: { requiresAuth: true },
     },
   ],
@@ -100,9 +108,17 @@ router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token');
   const requiresAuth = to.meta.requiresAuth !== false;
 
+  let isAdmin = false;
+  try {
+    const stored = localStorage.getItem('user');
+    isAdmin = stored ? JSON.parse(stored).role === 'admin' : false;
+  } catch { /* treat as non-admin */ }
+
   if (requiresAuth && !token) {
     next('/login');
-  } else if (!requiresAuth && token && (to.name === 'login' || to.name === 'register')) {
+  } else if (!requiresAuth && token && to.name === 'login') {
+    next('/');
+  } else if (to.meta.requiresAdmin && !isAdmin) {
     next('/');
   } else {
     next();

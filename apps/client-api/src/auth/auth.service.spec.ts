@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import * as crypto from 'crypto';
@@ -99,39 +99,6 @@ describe('AuthService', () => {
       const result = await service.findByEmail(mockDb, 'notfound@example.com');
 
       expect(result).toBeNull();
-    });
-  });
-
-  describe('register', () => {
-    it('should create a new user', async () => {
-      mockDb.where
-        .mockResolvedValueOnce([]) // email check
-        .mockResolvedValueOnce([mockUser]); // findById after insert
-
-      const registerDto = {
-        email: 'john@example.com',
-        password: 'password123',
-        firstName: 'John',
-        lastName: 'Doe',
-      };
-
-      const result = await service.register(mockDb, registerDto);
-
-      expect(result).toEqual(mockSafeUser);
-      expect(mockDb.insert).toHaveBeenCalled();
-    });
-
-    it('should throw ConflictException when email exists', async () => {
-      mockDb.where.mockResolvedValue([mockUser]);
-
-      const registerDto = {
-        email: 'john@example.com',
-        password: 'password123',
-      };
-
-      await expect(service.register(mockDb, registerDto)).rejects.toThrow(
-        ConflictException
-      );
     });
   });
 

@@ -31,6 +31,7 @@ export type { LandlordDb } from './landlord/connection.js';
 // Tenant database exports
 export {
   users,
+  userRoleEnum,
   roles,
   userRoles,
   credentials,
@@ -62,6 +63,7 @@ export {
 export type {
   User,
   NewUser,
+  UserRoleLevel,
   Role,
   NewRole,
   UserRole,

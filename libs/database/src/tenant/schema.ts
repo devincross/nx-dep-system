@@ -13,6 +13,11 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 
+// User role levels: admin has full access; user cannot manage users,
+// credentials, or the NetSuite/ERP sections
+export const userRoleEnum = ['admin', 'user'] as const;
+export type UserRoleLevel = (typeof userRoleEnum)[number];
+
 // Example tenant schema - users table
 // This is a template that each tenant database will have
 export const users = mysqlTable('users', {
@@ -21,6 +26,7 @@ export const users = mysqlTable('users', {
   firstName: varchar('first_name', { length: 255 }),
   lastName: varchar('last_name', { length: 255 }),
   passwordHash: varchar('password_hash', { length: 255 }),
+  role: mysqlEnum('role', userRoleEnum).default('user').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
