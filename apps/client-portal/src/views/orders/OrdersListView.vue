@@ -156,6 +156,8 @@ async function runReconcile() {
 
     const response = await api.post('/orders/dep/reconcile', { orderIds: ids });
     reconcileResults.value = response.data.comparisons;
+    // Statuses may have been updated to match Apple — refresh the list
+    await loadOrders();
   } catch (err: any) {
     reconcileResults.value = [];
   } finally {
@@ -331,7 +333,7 @@ async function handleDelete() {
         <v-card-text>
           <div v-if="reconciling" class="text-center py-6">
             <v-progress-circular indeterminate color="primary" size="48" class="mb-4"></v-progress-circular>
-            <div>Comparing your order data with Apple's enrollment records...</div>
+            <div>Comparing your order data with Apple's enrollment records and updating statuses...</div>
           </div>
 
           <template v-if="reconcileResults">
@@ -344,6 +346,7 @@ async function handleDelete() {
                   <th>Apple Devices</th>
                   <th>Only in Our Records</th>
                   <th>Only in Apple</th>
+                  <th>Result</th>
                 </tr>
               </thead>
               <tbody>
@@ -366,6 +369,12 @@ async function handleDelete() {
                   <td>
                     <span v-if="c.differences.inDepNotOurs.length === 0" class="text-grey">--</span>
                     <v-chip v-else size="x-small" color="error">{{ c.differences.inDepNotOurs.length }}</v-chip>
+                  </td>
+                  <td>
+                    <v-chip v-if="c.action?.orderStatus" size="x-small" color="info" class="mr-1">
+                      {{ c.action.orderStatus.from }} → {{ c.action.orderStatus.to }}
+                    </v-chip>
+                    <div class="text-caption">{{ c.action?.reason }}</div>
                   </td>
                 </tr>
               </tbody>

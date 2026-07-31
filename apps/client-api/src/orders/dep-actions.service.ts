@@ -414,7 +414,16 @@ export class DepActionsService {
   }
 
   /**
-   * Reconcile: compare our DB, Apple DEP, and ERP data side by side
+   * Reconcile: compare our DB with Apple DEP and update our statuses to match.
+   *
+   * - Order found in DEP: devices Apple has enrolled are marked complete;
+   *   order status becomes complete (all DEP devices enrolled) or
+   *   submitted (some enrolled).
+   * - Order not in DEP + an error recorded on our side: left unchanged
+   *   for manual review.
+   * - Order not in DEP + no error: flagged 'pending' so it's visible as
+   *   needing enrollment.
+   * No statuses are touched if the Apple query itself fails.
    */
   async reconcileOrders(tenant: TenantContext, orderIds?: number[]) {
     const db = tenant.db;
@@ -445,12 +454,21 @@ export class DepActionsService {
       itemsByOrder.get(item.orderId)!.push(item);
     }
 
+    // Orders with an error transaction on record (in addition to
+    // order.status='error') count as "has an error in our system"
+    const errorTxnRows = await db
+      .select({ orderId: depTransactions.orderId })
+      .from(depTransactions)
+      .where(and(inArray(depTransactions.orderId, allOrderIds), eq(depTransactions.status, 'error')));
+    const errorTxnOrderIds = new Set(errorTxnRows.map((r) => r.orderId));
+
     // Get DEP details for orders that have depOrderId
     const depOrderNumbers = dbOrders
       .map((o) => o.depOrderId || o.externalOrderId)
       .filter(Boolean) as string[];
 
     const depData: Record<string, any> = {};
+    let depQueryOk = false;
     if (depCred && depOrderNumbers.length > 0) {
       try {
         const request = {
@@ -462,13 +480,15 @@ export class DepActionsService {
         for (const depOrder of response.orders ?? []) {
           depData[depOrder.orderNumber] = depOrder;
         }
+        depQueryOk = true;
       } catch (err) {
         this.logger.warn(`DEP reconciliation call failed: ${err}`);
       }
     }
 
-    // Build comparison
-    const comparisons = dbOrders.map((order) => {
+    // Build comparison and apply status updates
+    const comparisons = [];
+    for (const order of dbOrders) {
       const ourItems = itemsByOrder.get(order.id) ?? [];
       const orderNum = order.depOrderId || order.externalOrderId || String(order.id);
       const depOrder = depData[orderNum];
@@ -489,7 +509,9 @@ export class DepActionsService {
       const inOursNotDep = ourSerials.filter((s) => !depSerials.includes(s));
       const inDepNotOurs = depSerials.filter((s) => !ourSerials.includes(s));
 
-      return {
+      const action = await this.applyReconcileAction(db, order, ourItems, depOrder ? depSerials : null, depQueryOk, errorTxnOrderIds);
+
+      comparisons.push({
         orderId: order.id,
         orderNumber: orderNum,
         externalOrderId: order.externalOrderId,
@@ -517,10 +539,89 @@ export class DepActionsService {
           inDepNotOurs,
           match: inOursNotDep.length === 0 && inDepNotOurs.length === 0 && depOrder != null,
         },
-      };
-    });
+        action,
+      });
+    }
 
     return { comparisons };
+  }
+
+  /**
+   * Apply the reconcile outcome for one order. Returns a summary of what
+   * changed (shown in the reconcile dialog).
+   */
+  private async applyReconcileAction(
+    db: TenantDb,
+    order: typeof orders.$inferSelect,
+    ourItems: (typeof orderItems.$inferSelect)[],
+    depSerials: string[] | null,
+    depQueryOk: boolean,
+    errorTxnOrderIds: Set<number | null>,
+  ): Promise<{ orderStatus: { from: string; to: string } | null; itemsMarkedComplete: number; reason: string }> {
+    const action: { orderStatus: { from: string; to: string } | null; itemsMarkedComplete: number; reason: string } = {
+      orderStatus: null,
+      itemsMarkedComplete: 0,
+      reason: '',
+    };
+
+    if (!depQueryOk) {
+      action.reason = 'Apple query failed — no changes made';
+      return action;
+    }
+
+    const depItems = ourItems.filter((i) => i.isDep);
+
+    if (depSerials !== null) {
+      // Order exists in Apple DEP — sync our statuses to match
+      const enrolled = new Set(depSerials);
+      const toComplete = depItems.filter((i) => enrolled.has(i.serialNumber) && i.depStatus !== 'complete');
+      if (toComplete.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'complete', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, order.id),
+            inArray(orderItems.serialNumber, toComplete.map((i) => i.serialNumber)),
+          ));
+        action.itemsMarkedComplete = toComplete.length;
+      }
+
+      const enrolledCount = depItems.filter((i) => enrolled.has(i.serialNumber)).length;
+      let newStatus = order.status;
+      if (depItems.length > 0 && enrolledCount === depItems.length) {
+        newStatus = 'complete';
+      } else if (enrolledCount > 0) {
+        newStatus = 'submitted';
+      }
+
+      if (newStatus !== order.status) {
+        await db.update(orders)
+          .set({ status: newStatus, updatedAt: new Date() })
+          .where(eq(orders.id, order.id));
+        action.orderStatus = { from: order.status, to: newStatus };
+        action.reason = 'Updated to match Apple enrollment';
+      } else {
+        action.reason = action.itemsMarkedComplete > 0
+          ? 'Device statuses synced from Apple'
+          : 'Already in sync with Apple';
+      }
+      return action;
+    }
+
+    // Order not found in Apple DEP
+    if (depItems.length === 0) {
+      action.reason = 'No DEP devices — nothing to enroll';
+    } else if (order.status === 'error' || errorTxnOrderIds.has(order.id)) {
+      action.reason = 'Not in Apple, but has an error on our side — left for manual review';
+    } else if (order.status === 'pending') {
+      action.reason = 'Not found in Apple — already pending';
+    } else {
+      await db.update(orders)
+        .set({ status: 'pending', updatedAt: new Date() })
+        .where(eq(orders.id, order.id));
+      action.orderStatus = { from: order.status, to: 'pending' };
+      action.reason = 'Not found in Apple — flagged pending for enrollment';
+    }
+    return action;
   }
 
   // ---- Private helpers ----
