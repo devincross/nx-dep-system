@@ -208,17 +208,12 @@ export class DepSyncAdapter {
         res.on('end', () => {
           const raw = Buffer.concat(chunks);
 
-          // We ask for gzip/deflate — decompress before parsing
+          // We ask for gzip/deflate — decompress before parsing. Detection
+          // is by magic bytes, not the content-encoding header: Apple's CDN
+          // has been observed returning gzip bodies without the header.
           let decoded: Buffer;
           try {
-            const encoding = res.headers['content-encoding'];
-            if (encoding === 'gzip') {
-              decoded = zlib.gunzipSync(raw);
-            } else if (encoding === 'deflate') {
-              decoded = zlib.inflateSync(raw);
-            } else {
-              decoded = raw;
-            }
+            decoded = this.decodeBody(raw, res.headers['content-encoding']);
           } catch (err) {
             reject(new Error(`Failed to decompress DEP response: ${err}`));
             return;
@@ -249,5 +244,27 @@ export class DepSyncAdapter {
     if (!this.config || !this.payloadBuilder) {
       throw new Error('DEP adapter not configured. Call configure() first.');
     }
+  }
+
+  /**
+   * Decompress a response body when compressed, detected by magic bytes
+   * with the content-encoding header as a fallback hint.
+   */
+  private decodeBody(raw: Buffer, contentEncoding?: string): Buffer {
+    if (raw.length >= 2) {
+      // gzip magic: 1f 8b
+      if (raw[0] === 0x1f && raw[1] === 0x8b) {
+        return zlib.gunzipSync(raw);
+      }
+      // zlib/deflate magic: 78 01 / 78 9c / 78 da
+      if (raw[0] === 0x78 && (raw[1] === 0x01 || raw[1] === 0x9c || raw[1] === 0xda)) {
+        return zlib.inflateSync(raw);
+      }
+    }
+
+    if (contentEncoding === 'gzip') return zlib.gunzipSync(raw);
+    if (contentEncoding === 'deflate') return zlib.inflateRawSync(raw);
+
+    return raw;
   }
 }

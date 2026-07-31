@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import {
   getLandlordDb,
   tenants,
+  domains,
   credentials,
   TenantDb,
 } from '@org/database';
@@ -71,12 +72,27 @@ export class SyncScheduler implements OnModuleInit {
   }
 
   /**
-   * Get all tenants with sync enabled from landlord database
+   * Get all tenants with sync enabled from the landlord database, joined
+   * with their domain rows for the tenant DB connection info — the same
+   * source of truth the DEP push/poll schedulers use. (Previously this
+   * guessed the DB name from a `tenant_<slug>` naming convention, which
+   * can silently connect to the wrong/unmigrated database.)
    */
   private async getSyncEnabledTenants() {
-    const results = await getLandlordDb()
-      .select()
+    const rows = await getLandlordDb()
+      .select({
+        tenantId: tenants.id,
+        slug: tenants.slug,
+        metadata: tenants.metadata,
+        dbHost: domains.dbHost,
+        dbPort: domains.dbPort,
+        dbName: domains.dbName,
+        dbUser: domains.dbUser,
+        dbPassword: domains.dbPassword,
+        isPrimary: domains.isPrimary,
+      })
       .from(tenants)
+      .innerJoin(domains, eq(tenants.id, domains.tenantId))
       .where(
         and(
           eq(tenants.isActive, true),
@@ -84,13 +100,29 @@ export class SyncScheduler implements OnModuleInit {
         )
       );
 
-    return results;
+    // Dedupe by tenant (pick primary domain)
+    const byTenant = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      if (!byTenant.has(row.tenantId) || row.isPrimary) {
+        byTenant.set(row.tenantId, row);
+      }
+    }
+
+    return [...byTenant.values()];
   }
 
   /**
    * Sync a single tenant
    */
-  private async syncTenant(tenant: typeof tenants.$inferSelect) {
+  private async syncTenant(tenant: {
+    slug: string;
+    metadata: string | null;
+    dbHost: string;
+    dbPort: number;
+    dbName: string;
+    dbUser: string;
+    dbPassword: string;
+  }) {
     this.logger.log(`Syncing tenant: ${tenant.slug}`);
 
     // Parse tenant metadata for connection type
@@ -99,12 +131,16 @@ export class SyncScheduler implements OnModuleInit {
       : {};
     const connectionType = metadata.connectionType || 'netsuite';
 
-    // Connect to tenant database
-    const tenantDb = await this.connectToTenantDb(tenant.slug);
-    if (!tenantDb) {
-      this.logger.error(`Failed to connect to tenant database: ${tenant.slug}`);
-      return;
-    }
+    // Connect to tenant database using the connection info from the
+    // domains table
+    const connection = await mysql.createConnection({
+      host: tenant.dbHost,
+      port: tenant.dbPort,
+      user: tenant.dbUser,
+      password: tenant.dbPassword,
+      database: tenant.dbName,
+    });
+    const tenantDb = drizzle(connection) as unknown as TenantDb;
 
     try {
       // Get credentials for the connection type
@@ -161,25 +197,7 @@ export class SyncScheduler implements OnModuleInit {
 
       this.logger.log(`Tenant ${tenant.slug} sync complete`);
     } finally {
-      // Close tenant database connection
-      // Note: In production, you might want to pool these connections
-    }
-  }
-
-  private async connectToTenantDb(slug: string): Promise<TenantDb | null> {
-    try {
-      const dbName = `tenant_${slug.replace(/-/g, '_')}`;
-      const connection = await mysql.createConnection({
-        host: process.env['DB_HOST'] || 'localhost',
-        port: parseInt(process.env['DB_PORT'] || '3306'),
-        user: process.env['DB_USER'] || 'root',
-        password: process.env['DB_PASSWORD'] || '',
-        database: dbName,
-      });
-      return drizzle(connection) as unknown as TenantDb;
-    } catch (error) {
-      this.logger.error(`Failed to connect to tenant DB: ${error}`);
-      return null;
+      await connection.end();
     }
   }
 
