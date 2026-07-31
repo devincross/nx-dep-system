@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, watch } from 'vue';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
 import type { Order, OrderStatus } from '../../types';
@@ -7,6 +7,8 @@ import type { Order, OrderStatus } from '../../types';
 const ordersStore = useOrdersStore();
 const search = ref('');
 const statusFilter = ref<OrderStatus | ''>('');
+const page = ref(1);
+const itemsPerPage = ref(25);
 const deleteDialog = ref(false);
 const orderToDelete = ref<Order | null>(null);
 
@@ -25,36 +27,48 @@ const selectedOrders = ref<number[]>([]);
 
 const orderStatuses: OrderStatus[] = ['waiting', 'pending', 'submitted', 'complete', 'error', 'changes'];
 
+// Pagination + search happen server-side (searches all records, not just
+// the loaded page), so column sorting is disabled — newest first.
 const headers = [
-  { title: 'ID', key: 'id', sortable: true },
-  { title: 'Order ID', key: 'orderId', sortable: true },
-  { title: 'Ext Order', key: 'externalOrderId', sortable: true },
-  { title: 'Status', key: 'status', sortable: true },
-  { title: 'PO', key: 'po', sortable: true },
-  { title: 'Source', key: 'source', sortable: true },
-  { title: 'DEP', key: 'depOrderId', sortable: true },
-  { title: 'Created', key: 'createdAt', sortable: true },
+  { title: 'ID', key: 'id', sortable: false },
+  { title: 'Order ID', key: 'orderId', sortable: false },
+  { title: 'Ext Order', key: 'externalOrderId', sortable: false },
+  { title: 'Status', key: 'status', sortable: false },
+  { title: 'PO', key: 'po', sortable: false },
+  { title: 'Source', key: 'source', sortable: false },
+  { title: 'DEP', key: 'depOrderId', sortable: false },
+  { title: 'Created', key: 'createdAt', sortable: false },
   { title: 'Actions', key: 'actions', sortable: false, width: 280 },
 ];
 
-const filteredOrders = computed(() => {
-  let result = ordersStore.orders;
-  if (statusFilter.value) {
-    result = result.filter((o) => o.status === statusFilter.value);
-  }
-  if (search.value) {
-    const s = search.value.toLowerCase();
-    result = result.filter(
-      (o) =>
-        o.orderId.toLowerCase().includes(s) ||
-        o.externalOrderId?.toLowerCase().includes(s) ||
-        o.depOrderId?.toLowerCase().includes(s) ||
-        o.po?.toLowerCase().includes(s) ||
-        o.source?.toLowerCase().includes(s)
-    );
-  }
-  return result;
+async function loadOrders() {
+  await ordersStore.fetchPage({
+    page: page.value,
+    limit: itemsPerPage.value,
+    search: search.value || undefined,
+    status: statusFilter.value || undefined,
+  });
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(search, () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    page.value = 1;
+    loadOrders();
+  }, 400);
 });
+
+watch(statusFilter, () => {
+  page.value = 1;
+  loadOrders();
+});
+
+function onTableOptions(options: { page: number; itemsPerPage: number }) {
+  page.value = options.page;
+  itemsPerPage.value = options.itemsPerPage;
+  loadOrders();
+}
 
 function getStatusColor(status: OrderStatus): string {
   const colors: Record<OrderStatus, string> = {
@@ -138,10 +152,12 @@ async function runReconcile() {
   try {
     const ids = selectedOrders.value.length > 0
       ? selectedOrders.value
-      : filteredOrders.value.slice(0, 50).map((o) => o.id);
+      : ordersStore.orders.slice(0, 50).map((o) => o.id);
 
     const response = await api.post('/orders/dep/reconcile', { orderIds: ids });
     reconcileResults.value = response.data.comparisons;
+    // Statuses may have been updated to match Apple — refresh the list
+    await loadOrders();
   } catch (err: any) {
     reconcileResults.value = [];
   } finally {
@@ -160,14 +176,13 @@ async function handleDelete() {
   if (!orderToDelete.value) return;
   try {
     await ordersStore.remove(orderToDelete.value.id);
-    await ordersStore.fetchAll();
+    await loadOrders();
   } catch (err) { /* */ }
   deleteDialog.value = false;
 }
 
-onMounted(() => {
-  ordersStore.fetchAll();
-});
+// No onMounted fetch needed — v-data-table-server emits update:options on
+// mount, which triggers the initial load via onTableOptions.
 </script>
 
 <template>
@@ -222,7 +237,7 @@ onMounted(() => {
           </v-col>
         </v-row>
       </v-card-title>
-      <v-data-table :headers="headers" :items="filteredOrders" :loading="ordersStore.loading" :sort-by="[{ key: 'id', order: 'desc' }]" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
+      <v-data-table-server :headers="headers" :items="ordersStore.orders" :items-length="ordersStore.total" :loading="ordersStore.loading" :page="page" :items-per-page="itemsPerPage" @update:options="onTableOptions" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
         <template v-slot:item.status="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">{{ item.status }}</v-chip>
         </template>
@@ -268,7 +283,7 @@ onMounted(() => {
 
           <v-btn icon size="small" @click="confirmDelete(item)" color="error"><v-icon>mdi-delete</v-icon></v-btn>
         </template>
-      </v-data-table>
+      </v-data-table-server>
     </v-card>
 
     <!-- Return Dialog -->
@@ -318,7 +333,7 @@ onMounted(() => {
         <v-card-text>
           <div v-if="reconciling" class="text-center py-6">
             <v-progress-circular indeterminate color="primary" size="48" class="mb-4"></v-progress-circular>
-            <div>Comparing your order data with Apple's enrollment records...</div>
+            <div>Comparing your order data with Apple's enrollment records and updating statuses...</div>
           </div>
 
           <template v-if="reconcileResults">
@@ -331,6 +346,7 @@ onMounted(() => {
                   <th>Apple Devices</th>
                   <th>Only in Our Records</th>
                   <th>Only in Apple</th>
+                  <th>Result</th>
                 </tr>
               </thead>
               <tbody>
@@ -353,6 +369,12 @@ onMounted(() => {
                   <td>
                     <span v-if="c.differences.inDepNotOurs.length === 0" class="text-grey">--</span>
                     <v-chip v-else size="x-small" color="error">{{ c.differences.inDepNotOurs.length }}</v-chip>
+                  </td>
+                  <td>
+                    <v-chip v-if="c.action?.orderStatus" size="x-small" color="info" class="mr-1">
+                      {{ c.action.orderStatus.from }} → {{ c.action.orderStatus.to }}
+                    </v-chip>
+                    <div class="text-caption">{{ c.action?.reason }}</div>
                   </td>
                 </tr>
               </tbody>

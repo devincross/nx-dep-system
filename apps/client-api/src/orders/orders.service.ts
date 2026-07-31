@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, isNull, and, inArray } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, Order, OrderItem } from '@org/database';
+import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
+import { TenantDb, orders, orderItems, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -11,6 +11,20 @@ function normalizeSerial(sn: string): string {
 // Order with items
 export interface OrderWithItems extends Order {
   items: OrderItem[];
+}
+
+export interface OrdersPageOptions {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: OrderStatus;
+}
+
+export interface OrdersPage {
+  items: OrderWithItems[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 @Injectable()
@@ -44,22 +58,64 @@ export class OrdersService {
   }
 
   /**
-   * Find all orders (excluding soft-deleted items)
+   * Find a page of orders with optional search/status filter
+   * (soft-deleted items excluded)
    */
-  async findAll(db: TenantDb): Promise<OrderWithItems[]> {
-    const orderResults = await db.select().from(orders);
+  async findPage(db: TenantDb, opts: OrdersPageOptions): Promise<OrdersPage> {
+    const conditions: SQL[] = [];
+    if (opts.status) {
+      conditions.push(eq(orders.status, opts.status));
+    }
+    const search = opts.search?.trim();
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push(
+        or(
+          like(orders.orderId, pattern),
+          like(orders.externalOrderId, pattern),
+          like(orders.depOrderId, pattern),
+          like(orders.po, pattern),
+          like(orders.source, pattern),
+        ) as SQL,
+      );
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const ordersWithItems: OrderWithItems[] = [];
-    for (const order of orderResults) {
-      const items = await db
-        .select()
-        .from(orderItems)
-        .where(and(eq(orderItems.orderId, order.id), isNull(orderItems.deletedAt)));
+    const [{ total }] = await db
+      .select({ total: sql<number>`COUNT(*)` })
+      .from(orders)
+      .where(where);
 
-      ordersWithItems.push({ ...order, items });
+    const pageRows = await db
+      .select()
+      .from(orders)
+      .where(where)
+      .orderBy(desc(orders.id))
+      .limit(opts.limit)
+      .offset((opts.page - 1) * opts.limit);
+
+    // Single query for the whole page's items instead of one per order
+    const orderIds = pageRows.map((o) => o.id);
+    const items = orderIds.length > 0
+      ? await db
+          .select()
+          .from(orderItems)
+          .where(and(inArray(orderItems.orderId, orderIds), isNull(orderItems.deletedAt)))
+      : [];
+
+    const itemsByOrder = new Map<number, OrderItem[]>();
+    for (const item of items) {
+      const list = itemsByOrder.get(item.orderId) ?? [];
+      list.push(item);
+      itemsByOrder.set(item.orderId, list);
     }
 
-    return ordersWithItems;
+    return {
+      items: pageRows.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] })),
+      total: Number(total),
+      page: opts.page,
+      limit: opts.limit,
+    };
   }
 
   /**

@@ -81,32 +81,39 @@ describe('OrdersService', () => {
     jest.clearAllMocks();
   });
 
-  describe('findAll', () => {
-    it('should return an array of orders with items', async () => {
-      mockDb.where
-        .mockResolvedValueOnce([mockOrder]) // never used - select without where for orders
-        .mockResolvedValueOnce([mockOrderItem]);
-
-      // Override select chain for initial order fetch
-      mockDb.from.mockReturnValueOnce({
-        ...mockDb,
-        where: undefined,
-      });
+  describe('findPage', () => {
+    it('should return a page of orders with items and a total count', async () => {
+      // Count query
       mockDb.select.mockReturnValueOnce({
-        from: jest.fn().mockResolvedValue([mockOrder]),
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ total: 1 }]),
+        }),
       });
-
-      // Mock items fetch
+      // Page query
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            orderBy: jest.fn().mockReturnValue({
+              limit: jest.fn().mockReturnValue({
+                offset: jest.fn().mockResolvedValue([mockOrder]),
+              }),
+            }),
+          }),
+        }),
+      });
+      // Items query for the page
       mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockResolvedValue([mockOrderItem]),
         }),
       });
 
-      const result = await service.findAll(mockDb);
+      const result = await service.findPage(mockDb, { page: 1, limit: 25 });
 
-      expect(result).toHaveLength(1);
-      expect(result[0].items).toBeDefined();
+      expect(result.total).toBe(1);
+      expect(result.page).toBe(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].items).toEqual([mockOrderItem]);
     });
   });
 

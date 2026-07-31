@@ -9,8 +9,10 @@ import {
   HttpCode,
   HttpStatus,
   ParseIntPipe,
+  Query,
   UseGuards,
 } from '@nestjs/common';
+import type { OrderStatus } from '@org/database';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { JwtAuthGuard } from '../auth/guards/index.js';
@@ -28,8 +30,19 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get()
-  async findAll(@CurrentTenant() tenant: TenantContext) {
-    return this.ordersService.findAll(tenant.db);
+  async findAll(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.ordersService.findPage(tenant.db, {
+      page: Math.max(1, parseInt(page ?? '1', 10) || 1),
+      limit: Math.min(100, Math.max(1, parseInt(limit ?? '25', 10) || 25)),
+      search: search || undefined,
+      status: (status as OrderStatus) || undefined,
+    });
   }
 
   @Get('account/:accountId')
