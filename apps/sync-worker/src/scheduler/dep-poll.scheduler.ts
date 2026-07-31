@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, isNull } from 'drizzle-orm';
 import {
   getLandlordDb,
   tenants,
@@ -132,7 +132,17 @@ export class DepPollScheduler {
               responsePayload: responseJson,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
+            await this.applyOutcomeToOrder(tenantDb, txn, 'complete', response);
             this.logger.log(`DEP transaction ${txn.transactionId} completed`);
+          } else if ((response as any).statusCode === 'COMPLETE_WITH_ERRORS') {
+            const errorMsg = this.extractErrors(response);
+            await this.depTransactionRepo.updateStatus(txn.id, 'posted_with_errors', {
+              responsePayload: responseJson,
+              errorMessage: errorMsg,
+              completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
+            });
+            await this.applyOutcomeToOrder(tenantDb, txn, 'posted_with_errors', response);
+            this.logger.warn(`DEP transaction ${txn.transactionId} posted with errors: ${errorMsg}`);
           } else if (response.statusCode === 'ERROR') {
             const errorMsg = this.extractErrors(response);
             await this.depTransactionRepo.updateStatus(txn.id, 'error', {
@@ -140,7 +150,7 @@ export class DepPollScheduler {
               errorMessage: errorMsg,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
-            await this.markOrderErrored(tenantDb, txn.orderId, response);
+            await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
             this.logger.warn(`DEP transaction ${txn.transactionId} errored: ${errorMsg}`);
           } else if (response.checkTransactionErrorResponse) {
             const errors = response.checkTransactionErrorResponse;
@@ -157,7 +167,7 @@ export class DepPollScheduler {
                 errorCode: errors[0].errorCode,
                 errorMessage: errorMsg,
               });
-              await this.markOrderErrored(tenantDb, txn.orderId, response);
+              await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
             }
           }
           // else: still in progress, leave as-is
@@ -174,37 +184,118 @@ export class DepPollScheduler {
   }
 
   /**
-   * Flag the order (and its failing devices) so a failed transaction is
-   * visible on the order list instead of leaving it stuck in 'submitted'.
+   * Reflect a resolved transaction on the order and its devices:
+   * - error: order → error, failing devices → error
+   * - complete (OR/OV): enrolled devices → complete; order → complete
+   *   once every DEP device on the order is complete
+   * - posted_with_errors: enrolled devices → complete, failing → error,
+   *   order → error so it surfaces for manual attention
+   * RE/VD completions only resolve the transaction, not device statuses.
    */
-  private async markOrderErrored(
+  private async applyOutcomeToOrder(
     db: TenantDb,
-    orderId: number | null | undefined,
+    txn: { orderId: number | null; orderType: string; requestPayload: string | null },
+    status: 'complete' | 'error' | 'posted_with_errors',
     response: any,
   ): Promise<void> {
+    const orderId = txn.orderId;
     if (!orderId) return;
 
-    await db.update(orders)
-      .set({ status: 'error', updatedAt: new Date() })
-      .where(eq(orders.id, orderId));
+    if (status === 'error') {
+      await db.update(orders)
+        .set({ status: 'error', updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
 
-    const failingSerials: string[] = [];
+      const failingSerials = this.extractDeviceIds(response, 'failing');
+      if (failingSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'error', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, failingSerials),
+          ));
+      }
+      return;
+    }
+
+    // Enrollment transactions mark their devices complete; returns/voids don't
+    if (txn.orderType === 'OR' || txn.orderType === 'OV') {
+      let completedSerials = this.extractDeviceIds(response, 'completed');
+      if (completedSerials.length === 0 && status === 'complete') {
+        // Apple sometimes returns no device detail — fall back to the
+        // devices we submitted in the original request
+        completedSerials = this.deviceIdsFromRequestPayload(txn.requestPayload);
+      }
+      if (completedSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'complete', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, completedSerials),
+          ));
+      }
+    }
+
+    if (status === 'posted_with_errors') {
+      const failingSerials = this.extractDeviceIds(response, 'failing');
+      if (failingSerials.length > 0) {
+        await db.update(orderItems)
+          .set({ depStatus: 'error', updatedAt: new Date() })
+          .where(and(
+            eq(orderItems.orderId, orderId),
+            inArray(orderItems.serialNumber, failingSerials),
+          ));
+      }
+      await db.update(orders)
+        .set({ status: 'error', updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+      return;
+    }
+
+    // Fully complete enrollment: order → complete once every DEP device is
+    if (txn.orderType === 'OR' || txn.orderType === 'OV') {
+      const items = await db.select().from(orderItems)
+        .where(and(eq(orderItems.orderId, orderId), isNull(orderItems.deletedAt)));
+      const depItems = items.filter((i) => i.isDep);
+      if (depItems.length > 0 && depItems.every((i) => i.depStatus === 'complete')) {
+        await db.update(orders)
+          .set({ status: 'complete', updatedAt: new Date() })
+          .where(eq(orders.id, orderId));
+      }
+    }
+  }
+
+  private extractDeviceIds(response: any, which: 'completed' | 'failing'): string[] {
+    const serials: string[] = [];
     for (const order of response.orders ?? []) {
       for (const delivery of order.deliveries ?? []) {
         for (const device of delivery.devices ?? []) {
-          if (device.deviceId && device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
-            failingSerials.push(device.deviceId);
+          if (!device.deviceId || !device.devicePostStatus) continue;
+          const isComplete = device.devicePostStatus === 'COMPLETE';
+          if ((which === 'completed') === isComplete) {
+            serials.push(device.deviceId);
           }
         }
       }
     }
-    if (failingSerials.length > 0) {
-      await db.update(orderItems)
-        .set({ depStatus: 'error', updatedAt: new Date() })
-        .where(and(
-          eq(orderItems.orderId, orderId),
-          inArray(orderItems.serialNumber, failingSerials),
-        ));
+    return serials;
+  }
+
+  private deviceIdsFromRequestPayload(requestPayload: string | null): string[] {
+    if (!requestPayload) return [];
+    try {
+      const req = JSON.parse(requestPayload);
+      const serials: string[] = [];
+      for (const order of req.orders ?? []) {
+        for (const delivery of order.deliveries ?? []) {
+          for (const device of delivery.devices ?? []) {
+            if (device.deviceId) serials.push(device.deviceId);
+          }
+        }
+      }
+      return serials;
+    } catch {
+      return [];
     }
   }
 
