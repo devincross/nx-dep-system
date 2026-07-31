@@ -7,23 +7,35 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { DepActionsService } from './dep-actions.service.js';
 
+// Note: the global ValidationPipe runs with whitelist + forbidNonWhitelisted,
+// so every property needs a validator decorator or requests carrying it 400.
+
 class DepEnrollDto {
   /** Override the customer ID (Apple org ID). Uses depAccountId from account if not provided */
+  @IsOptional()
+  @IsString()
   customerId?: string;
 }
 
 class DepReturnDto {
   /** Serial numbers to return. If empty, returns all devices on the order */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   serialNumbers?: string[];
 }
 
 class DepReconcileDto {
   /** Order IDs to reconcile. If empty, reconciles all orders on the current page */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
   orderIds?: number[];
 }
 
