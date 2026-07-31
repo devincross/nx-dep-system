@@ -10,18 +10,34 @@ import type {
   UpdateOrderItemDto,
 } from '../types';
 
+export interface OrdersPageParams {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: string;
+}
+
+interface OrdersPageResponse {
+  items: Order[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export const useOrdersStore = defineStore('orders', () => {
   const orders = ref<Order[]>([]);
+  const total = ref(0);
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  async function fetchAll(): Promise<Order[]> {
+  async function fetchPage(params: OrdersPageParams): Promise<Order[]> {
     loading.value = true;
     error.value = null;
     try {
-      const response = await api.get<Order[]>('/orders');
-      orders.value = response.data;
-      return response.data;
+      const response = await api.get<OrdersPageResponse>('/orders', { params });
+      orders.value = response.data.items;
+      total.value = response.data.total;
+      return response.data.items;
     } catch (err: any) {
       error.value = err.response?.data?.message || 'Unable to load your orders. Please check your internet connection and try again.';
       throw err;
@@ -167,9 +183,10 @@ export const useOrdersStore = defineStore('orders', () => {
 
   return {
     orders,
+    total,
     loading,
     error,
-    fetchAll,
+    fetchPage,
     fetchByAccountId,
     fetchOne,
     create,

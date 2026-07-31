@@ -43,7 +43,7 @@ describe('OrdersController', () => {
   };
 
   const mockOrdersService = {
-    findAll: jest.fn(),
+    findPage: jest.fn(),
     findOne: jest.fn(),
     findByAccountId: jest.fn(),
     create: jest.fn(),
@@ -74,13 +74,32 @@ describe('OrdersController', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of orders', async () => {
-      mockOrdersService.findAll.mockResolvedValue([mockOrder]);
+    it('should return a page of orders with defaults', async () => {
+      const pageResult = { items: [mockOrder], total: 1, page: 1, limit: 25 };
+      mockOrdersService.findPage.mockResolvedValue(pageResult);
 
       const result = await controller.findAll(mockTenantContext as any);
 
-      expect(result).toEqual([mockOrder]);
-      expect(mockOrdersService.findAll).toHaveBeenCalledWith(mockTenantContext.db);
+      expect(result).toEqual(pageResult);
+      expect(mockOrdersService.findPage).toHaveBeenCalledWith(mockTenantContext.db, {
+        page: 1,
+        limit: 25,
+        search: undefined,
+        status: undefined,
+      });
+    });
+
+    it('should pass through page, limit, search, and status', async () => {
+      mockOrdersService.findPage.mockResolvedValue({ items: [], total: 0, page: 3, limit: 50 });
+
+      await controller.findAll(mockTenantContext as any, '3', '50', 'NS765', 'error');
+
+      expect(mockOrdersService.findPage).toHaveBeenCalledWith(mockTenantContext.db, {
+        page: 3,
+        limit: 50,
+        search: 'NS765',
+        status: 'error',
+      });
     });
   });
 
