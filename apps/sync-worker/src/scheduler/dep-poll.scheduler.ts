@@ -14,6 +14,7 @@ import {
 } from '@org/database';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
+import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 
 @Injectable()
 export class DepPollScheduler {
@@ -324,13 +325,11 @@ export class DepPollScheduler {
 
     if (results.length === 0) return null;
 
-    // Note: connectionData is encrypted — in real use, decrypt via CredentialsService
-    // For the sync-worker, we parse it directly (assuming it's been decrypted or stored plain)
     let data: Record<string, unknown>;
     try {
-      data = JSON.parse(results[0].connectionData) as Record<string, unknown>;
-    } catch {
-      this.logger.error('Failed to parse DEP credentials');
+      data = parseConnectionData(results[0].connectionData);
+    } catch (error) {
+      this.logger.error(`Failed to parse DEP credentials: ${error}`);
       return null;
     }
 
