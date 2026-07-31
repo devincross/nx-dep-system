@@ -15,6 +15,7 @@ import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
+import { AccountRepository } from '../infrastructure/repositories/account.repository.js';
 
 @Injectable()
 export class DepPushScheduler {
@@ -26,6 +27,7 @@ export class DepPushScheduler {
     private readonly depTransactionRepo: DepTransactionRepository,
     private readonly orderRepository: OrderRepository,
     private readonly orderChangeRepository: OrderChangeRepository,
+    private readonly accountRepository: AccountRepository,
   ) {}
 
   /**
@@ -100,18 +102,12 @@ export class DepPushScheduler {
       const depCred = await this.getDepCredentials(tenantDb);
       if (!depCred) return; // No DEP credentials — skip silently
 
-      // Get the customer ID (depAccountId from the account or from credentials)
-      const customerId = depCred.customerId;
-      if (!customerId) {
-        this.logger.warn(`No DEP customer ID configured for tenant ${tenant.slug}`);
-        return;
-      }
-
       // Configure adapter and repos
       this.depAdapter.configure(depCred);
       this.depTransactionRepo.setDb(tenantDb);
       this.orderRepository.setDb(tenantDb);
       this.orderChangeRepository.setDb(tenantDb);
+      this.accountRepository.setDb(tenantDb);
       this.orderRepository.setChangeRepository(this.orderChangeRepository);
 
       const result = await this.depPushUseCase.execute(
@@ -119,7 +115,7 @@ export class DepPushScheduler {
         this.orderRepository,
         this.depAdapter,
         this.depTransactionRepo,
-        { customerId },
+        this.accountRepository,
       );
 
       if (result.submitted > 0 || result.failed > 0) {
@@ -134,7 +130,7 @@ export class DepPushScheduler {
 
   private async getDepCredentials(
     db: TenantDb,
-  ): Promise<(DepAdapterConfig & { customerId: string }) | null> {
+  ): Promise<DepAdapterConfig | null> {
     const results = await db
       .select()
       .from(credentials)
@@ -155,10 +151,9 @@ export class DepPushScheduler {
     const depResellerId = data['dep_reseller_id'] as string;
     const sslKey = data['ssl_key'] as string;
     const sslCert = data['ssl_cert'] as string;
-    const customerId = data['sap_sold_to'] as string;
 
     if (!apiUrl || !shipTo || !depResellerId || !sslKey || !sslCert) return null;
 
-    return { apiUrl, shipTo, depResellerId, sslKey, sslCert, customerId };
+    return { apiUrl, shipTo, depResellerId, sslKey, sslCert };
   }
 }

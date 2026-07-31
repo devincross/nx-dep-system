@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { like, or, desc, sql, type SQL } from 'drizzle-orm';
+import { eq, like, or, desc, type SQL } from 'drizzle-orm';
 import { TenantDb, accounts } from '@org/database';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
 
@@ -68,22 +68,28 @@ export class AccountsService {
       const depAccountId = this.str(row['dep_id']);
 
       const now = new Date();
-      const insertResult = await db
-        .insert(accounts)
-        .values({ externalAccountId, name, depAccountId, createdAt: now, updatedAt: now })
-        .onDuplicateKeyUpdate({
-          set: {
-            name: sql`COALESCE(VALUES(name), ${accounts.name})`,
-            depAccountId: sql`COALESCE(VALUES(dep_account_id), ${accounts.depAccountId})`,
-            updatedAt: now,
-          },
-        });
+      // accounts has no unique key on external_account_id, so
+      // onDuplicateKeyUpdate can't fire — update existing rows directly
+      // (all of them, in case duplicates exist), then insert if none matched.
+      const updateResult = await db
+        .update(accounts)
+        .set({
+          ...(name ? { name } : {}),
+          ...(depAccountId ? { depAccountId } : {}),
+          updatedAt: now,
+        })
+        .where(eq(accounts.externalAccountId, externalAccountId));
 
-      // MySQL2 returns affectedRows: 1 for insert, 2 for update on duplicate-key
-      const affected = (insertResult as unknown as { affectedRows?: number })?.affectedRows ?? 0;
-      if (affected >= 2) result.updated++;
-      else if (affected === 1) result.created++;
-      else result.skipped++;
+      const affected =
+        (updateResult as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+      if (affected > 0) {
+        result.updated++;
+      } else {
+        await db
+          .insert(accounts)
+          .values({ externalAccountId, name, depAccountId, createdAt: now, updatedAt: now });
+        result.created++;
+      }
     }
 
     this.logger.log(

@@ -18,7 +18,6 @@ interface DepCredentials {
   depResellerId: string;
   sslKey: string;
   sslCert: string;
-  soldTo: string;
 }
 
 @Injectable()
@@ -504,11 +503,18 @@ export class DepActionsService {
     const cred = await this.getDepCredentials(db);
     if (!cred) throw new BadRequestException('No active DEP credentials configured');
 
-    // Resolve customer ID: explicit > account's depAccountId > soldTo
-    let resolvedCustomerId = customerId || cred.soldTo;
-    if (!customerId && order.accountId) {
+    // Resolve customer ID: explicit > account's depAccountId (Apple ABM org ID).
+    // Never fall back to sap_sold_to — Apple rejects it with DEP-ERR-OR-4102.
+    let resolvedCustomerId = customerId;
+    if (!resolvedCustomerId && order.accountId) {
       const acct = await db.select().from(accounts).where(eq(accounts.id, order.accountId)).limit(1);
       if (acct[0]?.depAccountId) resolvedCustomerId = acct[0].depAccountId;
+    }
+    if (!resolvedCustomerId) {
+      throw new BadRequestException(
+        `Order ${orderId} has no Apple org ID: its account is missing a DEP account ID. ` +
+          `Sync accounts from NetSuite or pass customerId explicitly.`,
+      );
     }
 
     return { order, items, cred, resolvedCustomerId };
@@ -524,7 +530,6 @@ export class DepActionsService {
       depResellerId: data['dep_reseller_id'] as string,
       sslKey: data['ssl_key'] as string,
       sslCert: data['ssl_cert'] as string,
-      soldTo: data['sap_sold_to'] as string,
     };
   }
 

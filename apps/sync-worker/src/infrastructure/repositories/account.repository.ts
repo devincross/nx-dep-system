@@ -22,6 +22,22 @@ export class AccountRepository implements AccountRepositoryPort {
     return this.db;
   }
 
+  async findById(id: number): Promise<PersistedAccountEntity | null> {
+    const db = this.ensureDb();
+
+    const results = await db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .limit(1);
+
+    if (results.length === 0) {
+      return null;
+    }
+
+    return this.toEntity(results[0]);
+  }
+
   async findByExternalId(externalAccountId: string): Promise<PersistedAccountEntity | null> {
     const db = this.ensureDb();
     
