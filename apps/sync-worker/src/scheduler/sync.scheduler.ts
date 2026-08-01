@@ -173,9 +173,20 @@ export class SyncScheduler implements OnModuleInit {
       // Wire up change tracking
       orderRepository.setChangeRepository(orderChangeRepository);
 
-      // Get last sync time for incremental sync
-      const lastAccountSync = await syncStatusRepository.getLatest('accounts');
-      const lastOrderSync = await syncStatusRepository.getLatest('orders');
+      // Get last successful sync time for incremental sync
+      const lastAccountSyncAt = await syncStatusRepository.getLastSuccessAt('accounts');
+      const lastOrderSyncAt = await syncStatusRepository.getLastSuccessAt('orders');
+
+      // A full-history orders pull takes NetSuite longer than fetch's
+      // 5-minute headers timeout. Bound the first-ever window; anything
+      // older comes in via the historical import tool.
+      const initialOrdersWindow = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const ordersSince = lastOrderSyncAt ?? initialOrdersWindow;
+      if (!lastOrderSyncAt) {
+        this.logger.log(
+          `No successful orders sync yet for ${tenant.slug} — starting from ${ordersSince.toISOString().split('T')[0]}`,
+        );
+      }
 
       // Sync accounts
       this.logger.log(`Syncing accounts for tenant ${tenant.slug}...`);
@@ -184,7 +195,7 @@ export class SyncScheduler implements OnModuleInit {
         mapper,
         accountRepository,
         syncStatusRepository,
-        { lastModified: lastAccountSync?.lastSuccessAt }
+        { lastModified: lastAccountSyncAt ?? undefined }
       );
 
       // Sync orders
@@ -195,7 +206,7 @@ export class SyncScheduler implements OnModuleInit {
         accountRepository,
         orderRepository,
         syncStatusRepository,
-        { lastModified: lastOrderSync?.lastSuccessAt }
+        { lastModified: ordersSince }
       );
 
       this.logger.log(`Tenant ${tenant.slug} sync complete`);
