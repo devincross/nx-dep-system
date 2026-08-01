@@ -20,11 +20,6 @@ import { parseConnectionData } from '../infrastructure/credential-decrypt.util.j
 export class DepPollScheduler {
   private readonly logger = new Logger(DepPollScheduler.name);
 
-  constructor(
-    private readonly depAdapter: DepSyncAdapter,
-    private readonly depTransactionRepo: DepTransactionRepository,
-  ) {}
-
   /**
    * Poll Apple DEP for pending transaction statuses every 5 minutes.
    *
@@ -101,10 +96,15 @@ export class DepPollScheduler {
 
     try {
       const tenantDb = drizzle(connection) as unknown as TenantDb;
-      this.depTransactionRepo.setDb(tenantDb);
+
+      // Fresh adapter + repository per run — shared singletons race with
+      // the other schedulers (see DepPushScheduler)
+      const depAdapter = new DepSyncAdapter();
+      const depTransactionRepo = new DepTransactionRepository();
+      depTransactionRepo.setDb(tenantDb);
 
       // Find pending transactions — short-circuit before any Apple call
-      const pendingTxns = await this.depTransactionRepo.findPendingTransactions();
+      const pendingTxns = await depTransactionRepo.findPendingTransactions();
       if (pendingTxns.length === 0) return false;
 
       this.logger.log(`Found ${pendingTxns.length} pending DEP transactions for ${tenant.slug}`);
@@ -116,20 +116,20 @@ export class DepPollScheduler {
         return false;
       }
 
-      this.depAdapter.configure(depCred);
+      depAdapter.configure(depCred);
 
       for (const txn of pendingTxns) {
         if (!txn.deviceEnrollmentTransactionId) continue;
 
         try {
-          const { response } = await this.depAdapter.checkTransactionStatus(
+          const { response } = await depAdapter.checkTransactionStatus(
             txn.deviceEnrollmentTransactionId,
           );
 
           const responseJson = JSON.stringify(response);
 
           if (response.statusCode === 'COMPLETE') {
-            await this.depTransactionRepo.updateStatus(txn.id, 'complete', {
+            await depTransactionRepo.updateStatus(txn.id, 'complete', {
               responsePayload: responseJson,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
@@ -137,7 +137,7 @@ export class DepPollScheduler {
             this.logger.log(`DEP transaction ${txn.transactionId} completed`);
           } else if ((response as any).statusCode === 'COMPLETE_WITH_ERRORS') {
             const errorMsg = this.extractErrors(response);
-            await this.depTransactionRepo.updateStatus(txn.id, 'posted_with_errors', {
+            await depTransactionRepo.updateStatus(txn.id, 'posted_with_errors', {
               responsePayload: responseJson,
               errorMessage: errorMsg,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
@@ -146,7 +146,7 @@ export class DepPollScheduler {
             this.logger.warn(`DEP transaction ${txn.transactionId} posted with errors: ${errorMsg}`);
           } else if (response.statusCode === 'ERROR') {
             const errorMsg = this.extractErrors(response);
-            await this.depTransactionRepo.updateStatus(txn.id, 'error', {
+            await depTransactionRepo.updateStatus(txn.id, 'error', {
               responsePayload: responseJson,
               errorMessage: errorMsg,
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
@@ -158,12 +158,12 @@ export class DepPollScheduler {
             const inProgress = errors.some((e) => e.errorCode === 'DEP-ERR-4003');
 
             if (inProgress) {
-              await this.depTransactionRepo.updateStatus(txn.id, 'in_progress', {
+              await depTransactionRepo.updateStatus(txn.id, 'in_progress', {
                 responsePayload: responseJson,
               });
             } else {
               const errorMsg = errors.map((e) => `${e.errorCode}: ${e.errorMessage}`).join('; ');
-              await this.depTransactionRepo.updateStatus(txn.id, 'error', {
+              await depTransactionRepo.updateStatus(txn.id, 'error', {
                 responsePayload: responseJson,
                 errorCode: errors[0].errorCode,
                 errorMessage: errorMsg,

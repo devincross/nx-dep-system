@@ -24,11 +24,6 @@ export class DepPushScheduler {
 
   constructor(
     private readonly depPushUseCase: DepPushChangesUseCase,
-    private readonly depAdapter: DepSyncAdapter,
-    private readonly depTransactionRepo: DepTransactionRepository,
-    private readonly orderRepository: OrderRepository,
-    private readonly orderChangeRepository: OrderChangeRepository,
-    private readonly accountRepository: AccountRepository,
   ) {}
 
   /**
@@ -103,20 +98,28 @@ export class DepPushScheduler {
       const depCred = await this.getDepCredentials(tenantDb);
       if (!depCred) return; // No DEP credentials — skip silently
 
-      // Configure adapter and repos
-      this.depAdapter.configure(depCred);
-      this.depTransactionRepo.setDb(tenantDb);
-      this.orderRepository.setDb(tenantDb);
-      this.orderChangeRepository.setDb(tenantDb);
-      this.accountRepository.setDb(tenantDb);
-      this.orderRepository.setChangeRepository(this.orderChangeRepository);
+      // Fresh adapter + repository instances per run — the schedulers run
+      // concurrently and shared singletons get re-pointed at connections
+      // that are closed when the other scheduler finishes.
+      const depAdapter = new DepSyncAdapter();
+      const depTransactionRepo = new DepTransactionRepository();
+      const orderRepository = new OrderRepository();
+      const orderChangeRepository = new OrderChangeRepository();
+      const accountRepository = new AccountRepository();
+
+      depAdapter.configure(depCred);
+      depTransactionRepo.setDb(tenantDb);
+      orderRepository.setDb(tenantDb);
+      orderChangeRepository.setDb(tenantDb);
+      accountRepository.setDb(tenantDb);
+      orderRepository.setChangeRepository(orderChangeRepository);
 
       const result = await this.depPushUseCase.execute(
-        this.orderChangeRepository,
-        this.orderRepository,
-        this.depAdapter,
-        this.depTransactionRepo,
-        this.accountRepository,
+        orderChangeRepository,
+        orderRepository,
+        depAdapter,
+        depTransactionRepo,
+        accountRepository,
       );
 
       if (result.submitted > 0 || result.failed > 0) {

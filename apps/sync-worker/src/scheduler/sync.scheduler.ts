@@ -36,10 +36,6 @@ export class SyncScheduler implements OnModuleInit {
     private readonly mapperRegistry: MapperRegistry,
     private readonly netsuiteAdapter: NetsuiteAdapter,
     private readonly zohoAdapter: ZohoAdapter,
-    private readonly accountRepository: AccountRepository,
-    private readonly orderRepository: OrderRepository,
-    private readonly syncStatusRepository: SyncStatusRepository,
-    private readonly orderChangeRepository: OrderChangeRepository,
   ) {}
 
   onModuleInit() {
@@ -161,26 +157,33 @@ export class SyncScheduler implements OnModuleInit {
         return;
       }
 
-      // Set database connection on repositories
-      this.accountRepository.setDb(tenantDb);
-      this.orderRepository.setDb(tenantDb);
-      this.syncStatusRepository.setDb(tenantDb);
-      this.orderChangeRepository.setDb(tenantDb);
+      // Fresh repository instances per run: the repositories are NOT the
+      // NestJS singletons because the DEP push/poll schedulers run
+      // concurrently and would re-point a shared repository at their own
+      // (soon-closed) connection mid-sync.
+      const accountRepository = new AccountRepository();
+      const orderRepository = new OrderRepository();
+      const syncStatusRepository = new SyncStatusRepository();
+      const orderChangeRepository = new OrderChangeRepository();
+      accountRepository.setDb(tenantDb);
+      orderRepository.setDb(tenantDb);
+      syncStatusRepository.setDb(tenantDb);
+      orderChangeRepository.setDb(tenantDb);
 
       // Wire up change tracking
-      this.orderRepository.setChangeRepository(this.orderChangeRepository);
+      orderRepository.setChangeRepository(orderChangeRepository);
 
       // Get last sync time for incremental sync
-      const lastAccountSync = await this.syncStatusRepository.getLatest('accounts');
-      const lastOrderSync = await this.syncStatusRepository.getLatest('orders');
+      const lastAccountSync = await syncStatusRepository.getLatest('accounts');
+      const lastOrderSync = await syncStatusRepository.getLatest('orders');
 
       // Sync accounts
       this.logger.log(`Syncing accounts for tenant ${tenant.slug}...`);
       await this.syncAccountsUseCase.execute(
         adapter,
         mapper,
-        this.accountRepository,
-        this.syncStatusRepository,
+        accountRepository,
+        syncStatusRepository,
         { lastModified: lastAccountSync?.lastSuccessAt }
       );
 
@@ -189,9 +192,9 @@ export class SyncScheduler implements OnModuleInit {
       await this.syncOrdersUseCase.execute(
         adapter,
         mapper,
-        this.accountRepository,
-        this.orderRepository,
-        this.syncStatusRepository,
+        accountRepository,
+        orderRepository,
+        syncStatusRepository,
         { lastModified: lastOrderSync?.lastSuccessAt }
       );
 
