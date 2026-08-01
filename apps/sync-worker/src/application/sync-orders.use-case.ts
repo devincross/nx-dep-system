@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { describeError } from './sync-accounts.use-case.js';
 import { DataSourcePort, MapperPort, FetchOptions } from '../domain/ports/data-source.port.js';
 import {
   AccountRepositoryPort,
@@ -89,9 +90,13 @@ export class SyncOrdersUseCase {
           }
         } catch (error) {
           result.errored++;
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          const errorMsg = describeError(error);
           result.errors.push(`Order sync error: ${errorMsg}`);
-          this.logger.error(`Error processing order: ${errorMsg}`);
+          // Log the first failure in full — the root cause is usually
+          // identical for every record, so don't spam the rest
+          if (result.errored === 1) {
+            this.logger.error(`Error processing order: ${errorMsg}`);
+          }
         }
       }
 
@@ -111,7 +116,7 @@ export class SyncOrdersUseCase {
       );
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = describeError(error);
       this.logger.error(`Orders sync failed: ${errorMsg}`);
       
       await syncStatusRepository.completeSync(syncStatus.id!, {

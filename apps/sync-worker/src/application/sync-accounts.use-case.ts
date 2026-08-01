@@ -2,6 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSourcePort, MapperPort, FetchOptions } from '../domain/ports/data-source.port.js';
 import { AccountRepositoryPort, SyncStatusRepositoryPort } from '../domain/ports/repository.port.js';
 
+/**
+ * Include the underlying cause (e.g. the actual MySQL error inside a
+ * drizzle "Failed query" wrapper) — the wrapper alone hides the reason.
+ */
+export function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return 'Unknown error';
+  const cause = (error as { cause?: unknown }).cause;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
+  return causeMsg ? `${error.message} — caused by: ${causeMsg}` : error.message;
+}
+
 export interface SyncAccountsResult {
   processed: number;
   created: number;
@@ -63,9 +74,13 @@ export class SyncAccountsUseCase {
           }
         } catch (error) {
           result.errored++;
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          const errorMsg = describeError(error);
           result.errors.push(`Account sync error: ${errorMsg}`);
-          this.logger.error(`Error processing account: ${errorMsg}`);
+          // Log the first failure in full — the root cause is usually
+          // identical for every record, so don't spam the rest
+          if (result.errored === 1) {
+            this.logger.error(`Error processing account: ${errorMsg}`);
+          }
         }
       }
 
@@ -85,7 +100,7 @@ export class SyncAccountsUseCase {
       );
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = describeError(error);
       this.logger.error(`Accounts sync failed: ${errorMsg}`);
       
       await syncStatusRepository.completeSync(syncStatus.id!, {
