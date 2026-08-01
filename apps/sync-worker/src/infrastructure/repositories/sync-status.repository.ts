@@ -117,6 +117,11 @@ export class SyncStatusRepository implements SyncStatusRepositoryPort {
     const now = new Date();
     const hasErrors = results.recordsErrored > 0 || !!results.errorMessage;
 
+    // error_message/error_details are TEXT columns (64KB) — a run with
+    // thousands of per-record errors would make this update itself fail
+    const truncate = (value: string | undefined, max: number) =>
+      value && value.length > max ? `${value.slice(0, max)}… [truncated]` : value;
+
     return this.update(id, {
       status: hasErrors ? 'error' : 'success',
       lastSuccessAt: hasErrors ? undefined : now,
@@ -124,8 +129,8 @@ export class SyncStatusRepository implements SyncStatusRepositoryPort {
       recordsCreated: results.recordsCreated,
       recordsUpdated: results.recordsUpdated,
       recordsErrored: results.recordsErrored,
-      errorMessage: results.errorMessage,
-      errorDetails: results.errorDetails,
+      errorMessage: truncate(results.errorMessage, 2000),
+      errorDetails: truncate(results.errorDetails, 50000),
       completedAt: now,
     });
   }
