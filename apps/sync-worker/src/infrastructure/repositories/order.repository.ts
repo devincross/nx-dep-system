@@ -396,6 +396,11 @@ export class OrderRepository implements OrderRepositoryPort {
     row: typeof orders.$inferSelect,
     items: (typeof orderItems.$inferSelect)[]
   ): PersistedOrderEntity {
+    // Soft-deleted items are excluded entirely: they must not count toward
+    // isDep, must not appear in DEP submission device lists, and must not
+    // be re-detected as "removed" by the sync diff on every cycle.
+    const activeItems = items.filter((item) => !item.deletedAt);
+
     return {
       id: row.id,
       orderId: row.orderId,
@@ -403,7 +408,7 @@ export class OrderRepository implements OrderRepositoryPort {
       externalOrderId: row.externalOrderId ?? '',
       externalAccountId: row.externalAccountId ?? '',
       externalOrderStatus: row.externalOrderStatus ?? undefined,
-      isDep: false, // Determined from items
+      isDep: activeItems.some((item) => item.isDep),
       po: row.po ?? undefined,
       source: row.source ?? undefined,
       status: row.status,
@@ -412,7 +417,7 @@ export class OrderRepository implements OrderRepositoryPort {
       depShippedAt: row.depShippedAt ?? undefined,
       createdAt: row.createdAt ?? new Date(),
       updatedAt: row.updatedAt ?? new Date(),
-      items: items.map(item => ({
+      items: activeItems.map(item => ({
         id: item.id,
         orderId: item.orderId,
         serialNumber: item.serialNumber,
