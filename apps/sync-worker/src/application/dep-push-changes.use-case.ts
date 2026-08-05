@@ -109,6 +109,13 @@ export class DepPushChangesUseCase {
             await this.markSynced(changeRepo, changes);
             continue;
           }
+          // Already enrolled by hand (e.g. right after a historical import)
+          // — don't submit a duplicate OR
+          if (order.status === 'submitted' || order.status === 'complete') {
+            result.skipped++;
+            await this.markSynced(changeRepo, changes);
+            continue;
+          }
           await this.submitEnroll(depAdapter, txnRepo, order, depItems, customerId, orderRepo, netsuiteAdapter);
           result.submitted++;
           await this.markSynced(changeRepo, changes);

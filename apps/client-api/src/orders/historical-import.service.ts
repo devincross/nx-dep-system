@@ -8,6 +8,8 @@ import {
   TenantDb,
   orders,
   orderItems,
+  orderChanges,
+  orderItemChanges,
   accounts,
   syncStatus as syncStatusTable,
 } from '@org/database';
@@ -154,8 +156,9 @@ export class HistoricalImportService {
               mapped.externalAccountId,
             );
 
-            // Upsert order WITHOUT change tracking
-            const created = await this.upsertOrderNoChanges(
+            // Upsert order — new orders record change rows so the DEP
+            // push scheduler enrolls them; updates stay change-free
+            const created = await this.upsertOrder(
               db,
               mapped,
               accountId,
@@ -491,7 +494,7 @@ export class HistoricalImportService {
     return Boolean(value);
   }
 
-  // ---- DB helpers (no change tracking) ----
+  // ---- DB helpers ----
 
   private async findOrCreateAccount(
     db: TenantDb,
@@ -514,7 +517,17 @@ export class HistoricalImportService {
     return Number(result[0].insertId);
   }
 
-  private async upsertOrderNoChanges(
+  /**
+   * Upsert an imported order.
+   *
+   * New orders record 'created'/'added' change rows so the DEP push
+   * scheduler picks them up on its next run and enrolls them (the poll
+   * scheduler then tracks the resulting transaction) — no manual enroll
+   * needed after an import. Updates to orders that already exist stay
+   * change-free so the import never re-triggers DEP submissions for
+   * orders the system is already managing.
+   */
+  private async upsertOrder(
     db: TenantDb,
     order: MappedOrder,
     accountId: number,
@@ -569,7 +582,7 @@ export class HistoricalImportService {
       return false;
     }
 
-    // Create new — NO change tracking
+    // Create new
     const result = await db.insert(orders).values({
       orderId: uuidv4(),
       accountId,
@@ -588,8 +601,9 @@ export class HistoricalImportService {
 
     const orderId = Number(result[0].insertId);
 
+    const itemIds: number[] = [];
     for (const item of order.items) {
-      await db.insert(orderItems).values({
+      const itemResult = await db.insert(orderItems).values({
         orderId,
         serialNumber: item.serialNumber,
         isDep: item.isDep,
@@ -597,6 +611,41 @@ export class HistoricalImportService {
         createdAt: now,
         updatedAt: now,
       });
+      itemIds.push(Number(itemResult[0].insertId));
+    }
+
+    // Record change rows (same shape the sync writes) so the DEP push
+    // scheduler enrolls this order on its next run
+    await db.insert(orderChanges).values({
+      orderId,
+      changeType: 'created',
+      snapshot: JSON.stringify({
+        id: orderId,
+        externalOrderId: order.externalOrderId,
+        externalAccountId: order.externalAccountId,
+        externalOrderStatus: order.externalOrderStatus,
+        status: 'waiting',
+        po: order.po,
+        source: order.source,
+      }),
+      createdAt: now,
+    });
+
+    if (order.items.length > 0) {
+      await db.insert(orderItemChanges).values(
+        order.items.map((item, i) => ({
+          orderId,
+          orderItemId: itemIds[i],
+          serialNumber: item.serialNumber,
+          changeType: 'added' as const,
+          snapshot: JSON.stringify({
+            serialNumber: item.serialNumber,
+            isDep: item.isDep,
+            depStatus: item.depStatus,
+          }),
+          createdAt: now,
+        })),
+      );
     }
 
     return true;
