@@ -85,6 +85,9 @@ describe('OrderRepository - Change Detection', () => {
     mockDb.values = jest.fn(() => Promise.resolve([{ insertId: BigInt(1) }]));
     mockDb.update = jest.fn(() => mockDb);
     mockDb.set = jest.fn(() => mockDb);
+    // Queries ending at .where() are awaited directly (e.g. the
+    // soft-deleted-serials lookup in syncOrderItems) — resolve to []
+    mockDb.then = (resolve: (rows: unknown[]) => unknown) => Promise.resolve(resolve([]));
 
     return mockDb;
   };
@@ -426,6 +429,36 @@ describe('OrderRepository - Change Detection', () => {
       for (const [setArg] of (mockDb.set as jest.Mock).mock.calls) {
         expect(setArg).not.toHaveProperty('depStatus');
       }
+
+      findSpy.mockRestore();
+    });
+
+    it('should NOT resurrect soft-deleted items still present in the feed', async () => {
+      // Serial removed by a return (or operator) — the source feed keeps
+      // listing it on the original order; it must stay removed
+      const existingOrder = createMockOrder({ items: [] });
+      const incomingOrder = createIncomingOrder({
+        items: [{ serialNumber: 'SN-001', isDep: true, depStatus: 'pending' }],
+      });
+
+      const findSpy = jest.spyOn(repository, 'findByExternalId')
+        .mockResolvedValue(existingOrder);
+
+      const mockDb = createMockDb();
+      let firstQuery = true;
+      mockDb.then = (resolve: (rows: unknown[]) => unknown) => {
+        const rows = firstQuery
+          ? [{ serialNumber: 'SN-001', deletedAt: new Date('2024-02-01') }]
+          : [];
+        firstQuery = false;
+        return Promise.resolve(resolve(rows));
+      };
+      repository.setDb(mockDb);
+
+      await repository.upsert(incomingOrder, 100);
+
+      expect(mockDb.insert).not.toHaveBeenCalled();
+      expect(mockChangeRepository.recordItemChanges).not.toHaveBeenCalled();
 
       findSpy.mockRestore();
     });

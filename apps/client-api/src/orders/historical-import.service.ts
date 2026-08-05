@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
@@ -109,6 +109,7 @@ export class HistoricalImportService {
     // Build the appropriate fetcher
     const fetcher = this.buildFetcher(connectionType, connData, tenant);
     const mapOrder = this.buildMapper(connectionType, connData);
+    const mapReturn = this.buildReturnMapper(connectionType, connData);
 
     const result: ImportResult = {
       processed: 0,
@@ -144,6 +145,19 @@ export class HistoricalImportService {
 
         for (const raw of fetchResult.data) {
           try {
+            // Returns/cancellations remove serials from existing orders;
+            // they must never be imported as orders themselves
+            const orderReturn = mapReturn?.(raw);
+            if (orderReturn) {
+              const removed = await this.applyReturnNoChanges(db, orderReturn.serialNumbers);
+              this.logger.log(
+                `Return ${orderReturn.externalOrderId}: removed ${removed}/${orderReturn.serialNumbers.length} serials`,
+              );
+              result.processed++;
+              result.updated++;
+              continue;
+            }
+
             const mapped = mapOrder(raw);
             if (!mapped.externalOrderId) {
               result.skipped++;
@@ -347,6 +361,53 @@ export class HistoricalImportService {
     }
 
     return this.netsuiteDefaultMapper;
+  }
+
+  /**
+   * Tenant-specific return detection, mirroring the sync-worker's
+   * MapperPort.mapReturn. Only BYU expresses returns in the order feed
+   * (transaction_type 'return'); other integrations get no return mapper.
+   */
+  private buildReturnMapper(
+    type: 'netsuite' | 'zoho',
+    connData: Record<string, unknown>,
+  ): ((raw: Record<string, unknown>) => { externalOrderId: string; serialNumbers: string[] } | null) | undefined {
+    const mappingClass = connData['mapping_class']
+      ? this.normalizeMappingClass(String(connData['mapping_class']))
+      : undefined;
+
+    if (type === 'netsuite' && mappingClass === 'byu') {
+      return (raw) => {
+        if (String(raw['transaction_type'] ?? '').toLowerCase() !== 'return') return null;
+        const products = (raw['products'] ?? []) as Array<Record<string, unknown>>;
+        const serialNumbers = products
+          .map((p) => (p['serial'] ? normalizeSerial(String(p['serial']).trim()) : ''))
+          .filter(Boolean);
+        return { externalOrderId: String(raw['order_id'] ?? ''), serialNumbers };
+      };
+    }
+
+    return undefined;
+  }
+
+  /** Soft-delete active items matching the serials — no change tracking. */
+  private async applyReturnNoChanges(db: TenantDb, serialNumbers: string[]): Promise<number> {
+    if (serialNumbers.length === 0) return 0;
+
+    const rows = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.serialNumber, serialNumbers));
+    const active = rows.filter((r) => !r.deletedAt);
+
+    const now = new Date();
+    for (const item of active) {
+      await db
+        .update(orderItems)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(orderItems.id, item.id));
+    }
+    return active.length;
   }
 
   private byuMapper(raw: Record<string, unknown>): MappedOrder {

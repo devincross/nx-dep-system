@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MapperPort, RawAccountData, RawOrderData } from '../../../../domain/ports/data-source.port.js';
+import { MapperPort, OrderReturnEntity, RawAccountData, RawOrderData } from '../../../../domain/ports/data-source.port.js';
 import { AccountEntity, OrderEntity, OrderItemEntity } from '../../../../domain/entities/index.js';
 import { RegisterMapper } from '../../mapper-registry.js';
 
@@ -21,6 +21,31 @@ export class ByuMapper implements MapperPort {
       depAccountId: raw['dep_id']
         ? String(raw['dep_id'])
         : undefined,
+    };
+  }
+
+  /**
+   * BYU expresses returns/cancellations as a separate NetSuite transaction
+   * with transaction_type 'return' whose products list the returned
+   * serials (same convention the legacy system handled). These must NOT
+   * become orders — the serials get removed from the orders holding them.
+   */
+  mapReturn(raw: RawOrderData): OrderReturnEntity | null {
+    if (String(raw['transaction_type'] ?? '').toLowerCase() !== 'return') {
+      return null;
+    }
+
+    const products = (raw['products'] ?? []) as Array<Record<string, unknown>>;
+    const serialNumbers: string[] = [];
+    for (const product of products) {
+      const rawSerial = product['serial'] ? String(product['serial']).trim() : '';
+      const serial = rawSerial.startsWith('S') ? rawSerial.slice(1) : rawSerial;
+      if (serial) serialNumbers.push(serial);
+    }
+
+    return {
+      externalOrderId: String(raw['order_id'] ?? ''),
+      serialNumbers,
     };
   }
 
