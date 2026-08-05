@@ -365,14 +365,14 @@ describe('OrderRepository - Change Detection', () => {
           {
             serialNumber: 'SN-001',
             isDep: true, // Changed from false to true
-            depStatus: 'submitted', // Changed from pending to submitted
+            depStatus: 'pending',
           },
         ],
       });
 
       const findSpy = jest.spyOn(repository, 'findByExternalId')
         .mockResolvedValueOnce(existingOrder)
-        .mockResolvedValueOnce({ ...existingOrder, items: [{ ...existingItem, isDep: true, depStatus: 'submitted' }] });
+        .mockResolvedValueOnce({ ...existingOrder, items: [{ ...existingItem, isDep: true }] });
 
       const mockDb = createMockDb();
       repository.setDb(mockDb);
@@ -386,11 +386,46 @@ describe('OrderRepository - Change Detection', () => {
             changeType: 'updated',
             changedFields: expect.objectContaining({
               isDep: { old: false, new: true },
-              depStatus: { old: 'pending', new: 'submitted' },
             }),
           }),
         ])
       );
+
+      findSpy.mockRestore();
+    });
+
+    it('should NOT sync depStatus from upstream (owned by the DEP pipeline)', async () => {
+      // The poll scheduler marked this item complete; the mapper always
+      // emits 'pending' — a re-sync must not revert the enrollment status
+      const existingItem = createMockItem({
+        serialNumber: 'SN-001',
+        isDep: true,
+        depStatus: 'complete',
+      });
+      const existingOrder = createMockOrder({
+        items: [existingItem],
+      });
+
+      const incomingOrder = createIncomingOrder({
+        items: [
+          { serialNumber: 'SN-001', isDep: true, depStatus: 'pending' },
+        ],
+      });
+
+      const findSpy = jest.spyOn(repository, 'findByExternalId')
+        .mockResolvedValueOnce(existingOrder)
+        .mockResolvedValueOnce(existingOrder);
+
+      const mockDb = createMockDb();
+      repository.setDb(mockDb);
+
+      await repository.upsert(incomingOrder, 100);
+
+      expect(mockChangeRepository.recordItemChanges).not.toHaveBeenCalled();
+      // No write may touch depStatus (the order-row refresh still runs)
+      for (const [setArg] of (mockDb.set as jest.Mock).mock.calls) {
+        expect(setArg).not.toHaveProperty('depStatus');
+      }
 
       findSpy.mockRestore();
     });

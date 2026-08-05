@@ -85,6 +85,11 @@ export interface OrderRepositoryPort {
    * Upsert order (create or update based on external ID)
    */
   upsert(order: OrderEntity, accountId: number): Promise<{ entity: PersistedOrderEntity; created: boolean }>;
+
+  /**
+   * Mark an order and the given item serials as submitted to DEP
+   */
+  markDepSubmitted(orderId: number, serialNumbers: string[]): Promise<void>;
 }
 
 /**

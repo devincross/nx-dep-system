@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { TenantDb, orders, orderItems } from '@org/database';
 import {
@@ -173,6 +173,24 @@ export class OrderRepository implements OrderRepositoryPort {
     return this.findByExternalId(order.externalOrderId ?? '') as Promise<PersistedOrderEntity>;
   }
 
+  async markDepSubmitted(orderId: number, serialNumbers: string[]): Promise<void> {
+    const db = this.ensureDb();
+    const now = new Date();
+
+    await db.update(orders)
+      .set({ status: 'submitted', updatedAt: now })
+      .where(eq(orders.id, orderId));
+
+    if (serialNumbers.length > 0) {
+      await db.update(orderItems)
+        .set({ depStatus: 'submitted', updatedAt: now })
+        .where(and(
+          eq(orderItems.orderId, orderId),
+          inArray(orderItems.serialNumber, serialNumbers),
+        ));
+    }
+  }
+
   async upsert(order: OrderEntity, accountId: number): Promise<{ entity: PersistedOrderEntity; created: boolean }> {
     const existing = await this.findByExternalId(order.externalOrderId);
 
@@ -284,14 +302,14 @@ export class OrderRepository implements OrderRepositoryPort {
           snapshot: { ...incoming },
         });
       } else {
-        // Existing item - check for updates
+        // Existing item - check for updates.
+        // depStatus is intentionally NOT synced: it's owned by the DEP
+        // pipeline (poll scheduler / manual actions), and mappers always
+        // emit 'pending' — syncing it would revert enrolled items.
         const fieldChanges: ChangedFields = {};
 
         if (existing.isDep !== incoming.isDep) {
           fieldChanges['isDep'] = { old: existing.isDep, new: incoming.isDep };
-        }
-        if (existing.depStatus !== incoming.depStatus) {
-          fieldChanges['depStatus'] = { old: existing.depStatus, new: incoming.depStatus };
         }
 
         if (Object.keys(fieldChanges).length > 0) {
@@ -299,7 +317,6 @@ export class OrderRepository implements OrderRepositoryPort {
           await db.update(orderItems)
             .set({
               isDep: incoming.isDep,
-              depStatus: incoming.depStatus,
               updatedAt: now,
             })
             .where(eq(orderItems.id, existing.id));

@@ -39,7 +39,9 @@ export class ByuMapper implements MapperPort {
       po: raw['po'] ? String(raw['po']) : undefined,
       items,
       source: 'byu',
-      depOrderId: String(raw['order_id'] ?? ''),
+      // Apple DEP order numbers are 'NS' + NetSuite order id — the legacy
+      // system's convention, also used by the historical import
+      depOrderId: raw['order_id'] ? `NS${raw['order_id']}` : '',
       depOrderedAt: raw['date_created']
         ? new Date(String(raw['date_created']))
         : undefined,

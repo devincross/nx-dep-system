@@ -10,6 +10,7 @@ import {
   depTransactions,
 } from '@org/database';
 import { CredentialsService } from '../credentials/credentials.service.js';
+import { NetsuiteService } from '../netsuite/netsuite.service.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 
 interface DepCredentials {
@@ -24,7 +25,10 @@ interface DepCredentials {
 export class DepActionsService {
   private readonly logger = new Logger(DepActionsService.name);
 
-  constructor(private readonly credentialsService: CredentialsService) {}
+  constructor(
+    private readonly credentialsService: CredentialsService,
+    private readonly netsuiteService: NetsuiteService,
+  ) {}
 
   async enrollOrder(db: TenantDb, orderId: number, customerId?: string) {
     const { order, items, cred, resolvedCustomerId } = await this.loadOrderAndCreds(db, orderId, customerId);
@@ -223,6 +227,11 @@ export class DepActionsService {
       await db.update(orders)
         .set({ status: newOrderStatus, updatedAt: new Date() })
         .where(eq(orders.id, orderId));
+
+      // Fully enrolled — reflect it on the NetSuite order
+      if (newOrderStatus === 'complete') {
+        await this.pushDepStatusToNetsuite(db, order.externalOrderId, 'Complete', 'Complete');
+      }
     }
 
     this.logger.log(`[checkAndUpdateDepStatus] Order ${orderId}: ${completedCount}/${depItems.length} enrolled, status: ${order.status} → ${newOrderStatus}`);
@@ -264,7 +273,7 @@ export class DepActionsService {
       throw new BadRequestException('Transaction is not linked to an order');
     }
 
-    const { cred } = await this.loadOrderAndCreds(db, txn.orderId);
+    const { order, cred } = await this.loadOrderAndCreds(db, txn.orderId);
 
     const request = {
       requestContext: { shipTo: cred.shipTo, timeZone: '420', langCode: 'en' },
@@ -334,6 +343,21 @@ export class DepActionsService {
       status,
       response,
     );
+
+    // Reflect the resolved outcome on the NetSuite order
+    if (status === 'complete') {
+      const depResponse = txn.orderType === 'RE' ? 'Return Complete'
+        : txn.orderType === 'VD' ? 'Void Complete'
+        : 'Complete';
+      await this.pushDepStatusToNetsuite(db, order.externalOrderId, depResponse, 'Complete');
+    } else if (status === 'error' || status === 'posted_with_errors') {
+      await this.pushDepStatusToNetsuite(
+        db,
+        order.externalOrderId,
+        errorMessage || 'There is a problem with this order',
+        'Error',
+      );
+    }
 
     return {
       transactionId: txn.transactionId,
@@ -737,6 +761,41 @@ export class DepActionsService {
     return action;
   }
 
+  /**
+   * Push a DEP outcome back to the NetSuite order via the order RESTlet
+   * (same contract as the legacy system: PUT { order_id, dep_response,
+   * dep_status }). Best-effort — a NetSuite failure is logged, never thrown,
+   * and tenants without NetSuite credentials are skipped.
+   */
+  private async pushDepStatusToNetsuite(
+    db: TenantDb,
+    externalOrderId: string | null | undefined,
+    depResponse: string,
+    depStatus: 'Complete' | 'Error',
+  ): Promise<void> {
+    if (!externalOrderId) return;
+
+    try {
+      const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
+      if (!cred) return;
+      const scriptId = (cred.connectionData as Record<string, unknown>)['netsuite_order_script_id'] as string;
+      if (!scriptId) return;
+
+      const result = await this.netsuiteService.makeRequest(db, 'PUT', scriptId, {
+        order_id: externalOrderId,
+        dep_response: depResponse.slice(0, 1000),
+        dep_status: depStatus,
+      });
+      if (result.success) {
+        this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
+      } else {
+        this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${result.error}`);
+      }
+    } catch (err) {
+      this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${err}`);
+    }
+  }
+
   // ---- Private helpers ----
 
   private async loadOrderAndCreds(db: TenantDb, orderId: number, customerId?: string) {
@@ -840,6 +899,24 @@ export class DepActionsService {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+
+    // Apple rejected the submission outright — the poll scheduler will never
+    // see this transaction (no deviceEnrollmentTransactionId), so surface the
+    // error on the NetSuite order now. SC is a read-only query, not a
+    // submission; a failed query is not an order error.
+    if (status === 'error' && orderType !== 'SC') {
+      const rows = await db
+        .select({ externalOrderId: orders.externalOrderId })
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1);
+      await this.pushDepStatusToNetsuite(
+        db,
+        rows[0]?.externalOrderId,
+        resp.errorMessage || resp.errorCode || 'Apple DEP rejected the submission',
+        'Error',
+      );
+    }
   }
 
   private formatDate(d: Date): string {

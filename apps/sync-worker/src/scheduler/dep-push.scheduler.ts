@@ -12,6 +12,7 @@ import {
 } from '@org/database';
 import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
+import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
@@ -114,12 +115,17 @@ export class DepPushScheduler {
       accountRepository.setDb(tenantDb);
       orderRepository.setChangeRepository(orderChangeRepository);
 
+      // For pushing submission rejections back to the NetSuite order —
+      // null for tenants without NetSuite credentials
+      const netsuiteAdapter = await this.getNetsuiteAdapter(tenantDb);
+
       const result = await this.depPushUseCase.execute(
         orderChangeRepository,
         orderRepository,
         depAdapter,
         depTransactionRepo,
         accountRepository,
+        netsuiteAdapter,
       );
 
       if (result.submitted > 0 || result.failed > 0) {
@@ -129,6 +135,23 @@ export class DepPushScheduler {
       }
     } finally {
       await connection.end();
+    }
+  }
+
+  private async getNetsuiteAdapter(db: TenantDb): Promise<NetsuiteAdapter | null> {
+    const results = await db
+      .select()
+      .from(credentials)
+      .where(and(eq(credentials.type, 'netsuite'), eq(credentials.status, 'current')))
+      .limit(1);
+
+    if (results.length === 0) return null;
+
+    try {
+      return NetsuiteAdapter.fromConnectionData(parseConnectionData(results[0].connectionData));
+    } catch (error) {
+      this.logger.error(`Failed to parse NetSuite credentials: ${error}`);
+      return null;
     }
   }
 
