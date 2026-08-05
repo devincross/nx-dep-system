@@ -69,6 +69,17 @@ export class DepActionsController {
   }
 
   /**
+   * Push the order's current state to the tenant's ERP (NetSuite or Zoho)
+   */
+  @Post(':id/erp/push-status')
+  async pushStatusToErp(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.depActionsService.pushOrderStateToErp(tenant, id);
+  }
+
+  /**
    * Manually void an order in Apple DEP (VD)
    */
   @Post(':id/dep/void')

@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, inArray, isNull } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as https from 'https';
 import {
@@ -762,6 +762,64 @@ export class DepActionsService {
   }
 
   /**
+   * Push the order's current state to the tenant's active ERP (NetSuite or
+   * Zoho, per tenant metadata). Manual action from the order view — unlike
+   * the pipeline write-backs this THROWS on failure so the user sees it.
+   */
+  async pushOrderStateToErp(tenant: TenantContext, orderId: number) {
+    const db = tenant.db;
+
+    const orderRows = await db.select().from(orders).where(eq(orders.id, orderId));
+    if (orderRows.length === 0) throw new NotFoundException(`Order ${orderId} not found`);
+    const order = orderRows[0];
+    if (!order.externalOrderId) {
+      throw new BadRequestException('Order has no external order ID — nothing to update in the ERP');
+    }
+
+    const items = await db
+      .select()
+      .from(orderItems)
+      .where(and(eq(orderItems.orderId, orderId), isNull(orderItems.deletedAt)));
+    const depItems = items.filter((i) => i.isDep);
+    const enrolledCount = depItems.filter((i) => i.depStatus === 'complete').length;
+
+    // Current state → the same dep_status/dep_response vocabulary the
+    // pipeline write-backs use, with a device summary for in-flight states
+    const depStatus = order.status.charAt(0).toUpperCase() + order.status.slice(1);
+    let depResponse: string;
+    if (order.status === 'complete') {
+      depResponse = 'Complete';
+    } else if (order.status === 'error') {
+      depResponse = (await this.latestDepErrorMessage(db, orderId)) ?? 'There is a problem with this order';
+    } else {
+      depResponse = `${enrolledCount}/${depItems.length} DEP devices enrolled`;
+    }
+
+    const metadata = tenant.tenant.metadata ? JSON.parse(tenant.tenant.metadata) : {};
+    const erp: 'netsuite' | 'zoho' = metadata.connectionType || 'netsuite';
+
+    if (erp === 'zoho') {
+      await this.pushDepStatusToZoho(db, order.externalOrderId, depResponse, depStatus);
+    } else {
+      const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
+      if (!cred) throw new BadRequestException('No active NetSuite credentials configured');
+      await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, order.externalOrderId, depResponse, depStatus);
+    }
+
+    this.logger.log(`Pushed order ${orderId} state '${depStatus}' to ${erp} (${order.externalOrderId})`);
+    return { erp, orderId, externalOrderId: order.externalOrderId, depStatus, depResponse };
+  }
+
+  private async latestDepErrorMessage(db: TenantDb, orderId: number): Promise<string | null> {
+    const rows = await db
+      .select()
+      .from(depTransactions)
+      .where(eq(depTransactions.orderId, orderId))
+      .orderBy(desc(depTransactions.id));
+    return rows.find((t) => t.errorMessage)?.errorMessage ?? null;
+  }
+
+  /**
    * Push a DEP outcome back to the NetSuite order via the order RESTlet
    * (same contract as the legacy system: PUT { order_id, dep_response,
    * dep_status }). Best-effort — a NetSuite failure is logged, never thrown,
@@ -778,22 +836,89 @@ export class DepActionsService {
     try {
       const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
       if (!cred) return;
-      const scriptId = (cred.connectionData as Record<string, unknown>)['netsuite_order_script_id'] as string;
-      if (!scriptId) return;
-
-      const result = await this.netsuiteService.makeRequest(db, 'PUT', scriptId, {
-        order_id: externalOrderId,
-        dep_response: depResponse.slice(0, 1000),
-        dep_status: depStatus,
-      });
-      if (result.success) {
-        this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
-      } else {
-        this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${result.error}`);
-      }
+      await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, externalOrderId, depResponse, depStatus);
+      this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
     } catch (err) {
       this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${err}`);
     }
+  }
+
+  /** PUT { order_id, dep_response, dep_status } to the order RESTlet; throws on failure. */
+  private async netsuitePutDepStatus(
+    db: TenantDb,
+    connectionData: Record<string, unknown>,
+    externalOrderId: string,
+    depResponse: string,
+    depStatus: string,
+  ): Promise<void> {
+    const scriptId = connectionData['netsuite_order_script_id'] as string;
+    if (!scriptId) throw new BadRequestException('NetSuite credentials are missing netsuite_order_script_id');
+
+    const result = await this.netsuiteService.makeRequest(db, 'PUT', scriptId, {
+      order_id: externalOrderId,
+      dep_response: depResponse.slice(0, 1000),
+      dep_status: depStatus,
+    });
+    if (!result.success) {
+      throw new BadRequestException(`NetSuite update failed: ${result.error}`);
+    }
+  }
+
+  /**
+   * Update the Zoho CRM order record with the DEP state. Field API names
+   * default to DEP_Status / DEP_Response and can be overridden via the
+   * credential's zoho_dep_status_field / zoho_dep_response_field keys.
+   */
+  private async pushDepStatusToZoho(
+    db: TenantDb,
+    externalOrderId: string,
+    depResponse: string,
+    depStatus: string,
+  ): Promise<void> {
+    const cred = await this.credentialsService.findNewestActiveByType(db, 'zoho');
+    if (!cred) throw new BadRequestException('No active Zoho credentials configured');
+    const data = cred.connectionData as Record<string, unknown>;
+
+    const apiDomain = (data['api_domain'] as string) || 'https://www.zohoapis.com';
+    const ordersModule = (data['orders_module'] as string) || 'Sales_Orders';
+    const statusField = (data['zoho_dep_status_field'] as string) || 'DEP_Status';
+    const responseField = (data['zoho_dep_response_field'] as string) || 'DEP_Response';
+
+    const token = await this.getZohoAccessToken(data);
+    const resp = await fetch(`${apiDomain}/crm/v3/${ordersModule}/${externalOrderId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Zoho-oauthtoken ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data: [{ [statusField]: depStatus, [responseField]: depResponse.slice(0, 1000) }],
+      }),
+    });
+
+    const body = (await resp.json().catch(() => null)) as { data?: { status?: string; message?: string }[] } | null;
+    const recordResult = body?.data?.[0];
+    if (!resp.ok || recordResult?.status === 'error') {
+      throw new BadRequestException(`Zoho update failed: ${recordResult?.message || `HTTP ${resp.status}`}`);
+    }
+  }
+
+  private async getZohoAccessToken(connectionData: Record<string, unknown>): Promise<string> {
+    const resp = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: connectionData['client_id'] as string,
+        client_secret: connectionData['client_secret'] as string,
+        refresh_token: connectionData['refresh_token'] as string,
+      }).toString(),
+    });
+    const tok = (await resp.json()) as { access_token?: string; error?: string };
+    if (!tok.access_token) {
+      throw new BadRequestException(`Zoho token refresh failed: ${tok.error || 'unknown error'}`);
+    }
+    return tok.access_token;
   }
 
   // ---- Private helpers ----
