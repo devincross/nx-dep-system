@@ -45,7 +45,7 @@ export class UpdateOrderDto {
   changes?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   depOrderId?: string;
 
   @IsOptional()
