@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
-import type { OrderStatus, CreateOrderDto, UpdateOrderDto } from '../../types';
+import type { OrderStatus, CreateOrderDto, UpdateOrderDto, OrderItem } from '../../types';
 
 const route = useRoute();
 const router = useRouter();
@@ -28,6 +28,22 @@ const changes = ref('');
 const depOrderId = ref('');
 const source = ref('');
 
+// Devices
+const serialNumbersInput = ref('');
+const newItemsAreDep = ref(true);
+const existingItems = ref<OrderItem[]>([]);
+const itemsToRemove = ref<number[]>([]);
+
+function parseSerialNumbers(input: string): string[] {
+  return [...new Set(input.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean))];
+}
+
+function toggleRemoveItem(itemId: number) {
+  const idx = itemsToRemove.value.indexOf(itemId);
+  if (idx >= 0) itemsToRemove.value.splice(idx, 1);
+  else itemsToRemove.value.push(itemId);
+}
+
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
@@ -52,6 +68,8 @@ async function loadOrder() {
     changes.value = order.changes || '';
     depOrderId.value = order.depOrderId || '';
     source.value = order.source || '';
+    existingItems.value = order.items ?? [];
+    itemsToRemove.value = [];
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Failed to load order';
   } finally {
@@ -63,6 +81,8 @@ async function handleSubmit() {
   loading.value = true;
   error.value = '';
   try {
+    const newSerials = parseSerialNumbers(serialNumbersInput.value);
+
     if (isEdit.value && orderIdParam.value) {
       const updateData: UpdateOrderDto = {
         externalOrderId: externalOrderId.value || undefined,
@@ -75,6 +95,17 @@ async function handleSubmit() {
         source: source.value || undefined,
       };
       await ordersStore.update(orderIdParam.value, updateData);
+
+      for (const itemId of itemsToRemove.value) {
+        await ordersStore.removeOrderItem(orderIdParam.value, itemId);
+      }
+      for (const serialNumber of newSerials) {
+        await ordersStore.addOrderItem(orderIdParam.value, {
+          serialNumber,
+          isDep: newItemsAreDep.value,
+          depStatus: 'pending',
+        });
+      }
     } else {
       const createData: CreateOrderDto = {
         orderId: orderId.value,
@@ -87,6 +118,13 @@ async function handleSubmit() {
         changes: changes.value || undefined,
         depOrderId: depOrderId.value || undefined,
         source: source.value || undefined,
+        items: newSerials.length > 0
+          ? newSerials.map((serialNumber) => ({
+              serialNumber,
+              isDep: newItemsAreDep.value,
+              depStatus: 'pending' as const,
+            }))
+          : undefined,
       };
       await ordersStore.create(createData);
     }
@@ -149,6 +187,41 @@ onMounted(() => {
             </v-col>
             <v-col cols="12">
               <v-textarea v-model="changes" label="Changes" rows="3"></v-textarea>
+            </v-col>
+
+            <!-- Devices -->
+            <v-col cols="12">
+              <v-divider class="mb-3"></v-divider>
+              <div class="text-subtitle-1 mb-2">Devices</div>
+
+              <template v-if="isEdit && existingItems.length > 0">
+                <div class="text-caption text-medium-emphasis mb-1">Current devices — click one to mark it for removal</div>
+                <div class="mb-3">
+                  <v-chip
+                    v-for="item in existingItems"
+                    :key="item.id"
+                    class="mr-2 mb-2"
+                    :color="itemsToRemove.includes(item.id) ? 'error' : (item.isDep ? 'primary' : undefined)"
+                    :variant="itemsToRemove.includes(item.id) ? 'outlined' : 'tonal'"
+                    :class="{ 'text-decoration-line-through': itemsToRemove.includes(item.id) }"
+                    @click="toggleRemoveItem(item.id)"
+                  >
+                    {{ item.serialNumber }}
+                  </v-chip>
+                </div>
+                <v-alert v-if="itemsToRemove.length > 0" type="warning" variant="tonal" density="compact" class="mb-3">
+                  {{ itemsToRemove.length }} device{{ itemsToRemove.length !== 1 ? 's' : '' }} will be removed on update (DEP devices get returned from Apple).
+                </v-alert>
+              </template>
+
+              <v-textarea
+                v-model="serialNumbersInput"
+                :label="isEdit ? 'Add Serial Numbers' : 'Serial Numbers'"
+                rows="3"
+                hint="One per line or comma-separated. A leading 'S' is stripped automatically."
+                persistent-hint
+              ></v-textarea>
+              <v-checkbox v-model="newItemsAreDep" label="DEP devices" density="compact" hide-details></v-checkbox>
             </v-col>
           </v-row>
         </v-form>

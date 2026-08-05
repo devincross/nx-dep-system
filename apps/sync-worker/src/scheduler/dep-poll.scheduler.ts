@@ -13,6 +13,7 @@ import {
   TenantDb,
 } from '@org/database';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
+import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 
@@ -118,6 +119,10 @@ export class DepPollScheduler {
 
       depAdapter.configure(depCred);
 
+      // NetSuite adapter for pushing DEP outcomes back to the source
+      // system — null for tenants without NetSuite credentials
+      const netsuiteAdapter = await this.getNetsuiteAdapter(tenantDb);
+
       for (const txn of pendingTxns) {
         if (!txn.deviceEnrollmentTransactionId) continue;
 
@@ -134,6 +139,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'complete', response);
+            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'complete');
             this.logger.log(`DEP transaction ${txn.transactionId} completed`);
           } else if ((response as any).statusCode === 'COMPLETE_WITH_ERRORS') {
             const errorMsg = this.extractErrors(response);
@@ -143,6 +149,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'posted_with_errors', response);
+            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
             this.logger.warn(`DEP transaction ${txn.transactionId} posted with errors: ${errorMsg}`);
           } else if (response.statusCode === 'ERROR') {
             const errorMsg = this.extractErrors(response);
@@ -152,6 +159,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
+            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
             this.logger.warn(`DEP transaction ${txn.transactionId} errored: ${errorMsg}`);
           } else if (response.checkTransactionErrorResponse) {
             const errors = response.checkTransactionErrorResponse;
@@ -169,6 +177,7 @@ export class DepPollScheduler {
                 errorMessage: errorMsg,
               });
               await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
+              await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
             }
           }
           // else: still in progress, leave as-is
@@ -263,6 +272,73 @@ export class DepPollScheduler {
           .set({ status: 'complete', updatedAt: new Date() })
           .where(eq(orders.id, orderId));
       }
+    }
+  }
+
+  /**
+   * Push a resolved DEP outcome back to the NetSuite order (same RESTlet
+   * contract as the legacy system: PUT { order_id, dep_response, dep_status }).
+   * Best-effort — a NetSuite failure is logged but never blocks the poll.
+   */
+  private async pushOutcomeToNetsuite(
+    db: TenantDb,
+    netsuite: NetsuiteAdapter | null,
+    txn: { orderId: number | null; orderType: string; transactionId: string },
+    outcome: 'complete' | 'error',
+    errorMessage?: string,
+  ): Promise<void> {
+    if (!netsuite || !txn.orderId) return;
+
+    const rows = await db
+      .select({ externalOrderId: orders.externalOrderId })
+      .from(orders)
+      .where(eq(orders.id, txn.orderId))
+      .limit(1);
+    const externalOrderId = rows[0]?.externalOrderId;
+    if (!externalOrderId) return;
+
+    let depResponse: string;
+    let depStatus: string;
+    if (outcome === 'complete') {
+      depStatus = 'Complete';
+      depResponse = txn.orderType === 'RE' ? 'Return Complete'
+        : txn.orderType === 'VD' ? 'Void Complete'
+        : 'Complete';
+    } else {
+      depStatus = 'Error';
+      depResponse = (errorMessage || 'There is a problem with this order').slice(0, 1000);
+    }
+
+    try {
+      await netsuite.updateOrderDepStatus(externalOrderId, depResponse, depStatus);
+      this.logger.log(
+        `Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId} (txn ${txn.transactionId})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to push DEP status to NetSuite for order ${externalOrderId}: ${error}`,
+      );
+    }
+  }
+
+  /**
+   * Per-run NetSuite adapter from the tenant's credentials, or null when
+   * the tenant isn't NetSuite-backed.
+   */
+  private async getNetsuiteAdapter(db: TenantDb): Promise<NetsuiteAdapter | null> {
+    const results = await db
+      .select()
+      .from(credentials)
+      .where(and(eq(credentials.type, 'netsuite'), eq(credentials.status, 'current')))
+      .limit(1);
+
+    if (results.length === 0) return null;
+
+    try {
+      return NetsuiteAdapter.fromConnectionData(parseConnectionData(results[0].connectionData));
+    } catch (error) {
+      this.logger.error(`Failed to parse NetSuite credentials: ${error}`);
+      return null;
     }
   }
 

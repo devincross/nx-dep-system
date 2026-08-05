@@ -2,12 +2,14 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
   orders,
   orderItems,
+  orderChanges,
+  orderItemChanges,
   accounts,
   syncStatus as syncStatusTable,
 } from '@org/database';
@@ -107,6 +109,7 @@ export class HistoricalImportService {
     // Build the appropriate fetcher
     const fetcher = this.buildFetcher(connectionType, connData, tenant);
     const mapOrder = this.buildMapper(connectionType, connData);
+    const mapReturn = this.buildReturnMapper(connectionType, connData);
 
     const result: ImportResult = {
       processed: 0,
@@ -142,6 +145,19 @@ export class HistoricalImportService {
 
         for (const raw of fetchResult.data) {
           try {
+            // Returns/cancellations remove serials from existing orders;
+            // they must never be imported as orders themselves
+            const orderReturn = mapReturn?.(raw);
+            if (orderReturn) {
+              const removed = await this.applyReturnNoChanges(db, orderReturn.serialNumbers);
+              this.logger.log(
+                `Return ${orderReturn.externalOrderId}: removed ${removed}/${orderReturn.serialNumbers.length} serials`,
+              );
+              result.processed++;
+              result.updated++;
+              continue;
+            }
+
             const mapped = mapOrder(raw);
             if (!mapped.externalOrderId) {
               result.skipped++;
@@ -154,8 +170,9 @@ export class HistoricalImportService {
               mapped.externalAccountId,
             );
 
-            // Upsert order WITHOUT change tracking
-            const created = await this.upsertOrderNoChanges(
+            // Upsert order — new orders record change rows so the DEP
+            // push scheduler enrolls them; updates stay change-free
+            const created = await this.upsertOrder(
               db,
               mapped,
               accountId,
@@ -346,6 +363,53 @@ export class HistoricalImportService {
     return this.netsuiteDefaultMapper;
   }
 
+  /**
+   * Tenant-specific return detection, mirroring the sync-worker's
+   * MapperPort.mapReturn. Only BYU expresses returns in the order feed
+   * (transaction_type 'return'); other integrations get no return mapper.
+   */
+  private buildReturnMapper(
+    type: 'netsuite' | 'zoho',
+    connData: Record<string, unknown>,
+  ): ((raw: Record<string, unknown>) => { externalOrderId: string; serialNumbers: string[] } | null) | undefined {
+    const mappingClass = connData['mapping_class']
+      ? this.normalizeMappingClass(String(connData['mapping_class']))
+      : undefined;
+
+    if (type === 'netsuite' && mappingClass === 'byu') {
+      return (raw) => {
+        if (String(raw['transaction_type'] ?? '').toLowerCase() !== 'return') return null;
+        const products = (raw['products'] ?? []) as Array<Record<string, unknown>>;
+        const serialNumbers = products
+          .map((p) => (p['serial'] ? normalizeSerial(String(p['serial']).trim()) : ''))
+          .filter(Boolean);
+        return { externalOrderId: String(raw['order_id'] ?? ''), serialNumbers };
+      };
+    }
+
+    return undefined;
+  }
+
+  /** Soft-delete active items matching the serials — no change tracking. */
+  private async applyReturnNoChanges(db: TenantDb, serialNumbers: string[]): Promise<number> {
+    if (serialNumbers.length === 0) return 0;
+
+    const rows = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.serialNumber, serialNumbers));
+    const active = rows.filter((r) => !r.deletedAt);
+
+    const now = new Date();
+    for (const item of active) {
+      await db
+        .update(orderItems)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(orderItems.id, item.id));
+    }
+    return active.length;
+  }
+
   private byuMapper(raw: Record<string, unknown>): MappedOrder {
     const products = (raw['products'] ?? []) as Array<Record<string, unknown>>;
     const items: MappedOrderItem[] = [];
@@ -491,7 +555,7 @@ export class HistoricalImportService {
     return Boolean(value);
   }
 
-  // ---- DB helpers (no change tracking) ----
+  // ---- DB helpers ----
 
   private async findOrCreateAccount(
     db: TenantDb,
@@ -514,7 +578,17 @@ export class HistoricalImportService {
     return Number(result[0].insertId);
   }
 
-  private async upsertOrderNoChanges(
+  /**
+   * Upsert an imported order.
+   *
+   * New orders record 'created'/'added' change rows so the DEP push
+   * scheduler picks them up on its next run and enrolls them (the poll
+   * scheduler then tracks the resulting transaction) — no manual enroll
+   * needed after an import. Updates to orders that already exist stay
+   * change-free so the import never re-triggers DEP submissions for
+   * orders the system is already managing.
+   */
+  private async upsertOrder(
     db: TenantDb,
     order: MappedOrder,
     accountId: number,
@@ -569,7 +643,7 @@ export class HistoricalImportService {
       return false;
     }
 
-    // Create new — NO change tracking
+    // Create new
     const result = await db.insert(orders).values({
       orderId: uuidv4(),
       accountId,
@@ -588,8 +662,9 @@ export class HistoricalImportService {
 
     const orderId = Number(result[0].insertId);
 
+    const itemIds: number[] = [];
     for (const item of order.items) {
-      await db.insert(orderItems).values({
+      const itemResult = await db.insert(orderItems).values({
         orderId,
         serialNumber: item.serialNumber,
         isDep: item.isDep,
@@ -597,6 +672,41 @@ export class HistoricalImportService {
         createdAt: now,
         updatedAt: now,
       });
+      itemIds.push(Number(itemResult[0].insertId));
+    }
+
+    // Record change rows (same shape the sync writes) so the DEP push
+    // scheduler enrolls this order on its next run
+    await db.insert(orderChanges).values({
+      orderId,
+      changeType: 'created',
+      snapshot: JSON.stringify({
+        id: orderId,
+        externalOrderId: order.externalOrderId,
+        externalAccountId: order.externalAccountId,
+        externalOrderStatus: order.externalOrderStatus,
+        status: 'waiting',
+        po: order.po,
+        source: order.source,
+      }),
+      createdAt: now,
+    });
+
+    if (order.items.length > 0) {
+      await db.insert(orderItemChanges).values(
+        order.items.map((item, i) => ({
+          orderId,
+          orderItemId: itemIds[i],
+          serialNumber: item.serialNumber,
+          changeType: 'added' as const,
+          snapshot: JSON.stringify({
+            serialNumber: item.serialNumber,
+            isDep: item.isDep,
+            depStatus: item.depStatus,
+          }),
+          createdAt: now,
+        })),
+      );
     }
 
     return true;

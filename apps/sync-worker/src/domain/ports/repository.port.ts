@@ -85,6 +85,19 @@ export interface OrderRepositoryPort {
    * Upsert order (create or update based on external ID)
    */
   upsert(order: OrderEntity, accountId: number): Promise<{ entity: PersistedOrderEntity; created: boolean }>;
+
+  /**
+   * Mark an order and the given item serials as submitted to DEP
+   */
+  markDepSubmitted(orderId: number, serialNumbers: string[]): Promise<void>;
+
+  /**
+   * Remove (soft-delete) active items matching the given serials from
+   * whatever orders hold them, recording 'removed' item changes so the
+   * DEP push returns the devices. Used for source-system returns.
+   * Returns what was removed; serials with no active item are ignored.
+   */
+  removeItemsBySerial(serialNumbers: string[]): Promise<{ orderId: number; serialNumber: string }[]>;
 }
 
 /**

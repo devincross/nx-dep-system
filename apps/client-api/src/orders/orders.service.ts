@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, Order, OrderItem, OrderStatus } from '@org/database';
+import { TenantDb, orders, orderItems, orderItemChanges, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -364,10 +364,28 @@ export class OrdersService {
       throw new NotFoundException(`Order item with ID "${itemId}" not found`);
     }
 
+    const item = itemResult[0];
+    const now = new Date();
+
     await db
       .update(orderItems)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: now })
       .where(eq(orderItems.id, itemId));
+
+    // Record the removal so the DEP push returns the device from Apple
+    await db.insert(orderItemChanges).values({
+      orderId,
+      orderItemId: item.id,
+      serialNumber: item.serialNumber,
+      changeType: 'removed',
+      snapshot: JSON.stringify({
+        id: item.id,
+        serialNumber: item.serialNumber,
+        isDep: item.isDep,
+        depStatus: item.depStatus,
+      }),
+      createdAt: now,
+    });
   }
 
   /**
@@ -386,15 +404,31 @@ export class OrdersService {
       throw new NotFoundException(`Order item with ID "${itemId}" not found`);
     }
 
+    const now = new Date();
     await db
       .update(orderItems)
-      .set({ deletedAt: null, updatedAt: new Date() })
+      .set({ deletedAt: null, updatedAt: now })
       .where(eq(orderItems.id, itemId));
 
     const restored = await db
       .select()
       .from(orderItems)
       .where(eq(orderItems.id, itemId));
+
+    // Record the restore as an addition so the DEP push re-enrolls it
+    // (removal recorded a 'removed' change and returned it from Apple)
+    await db.insert(orderItemChanges).values({
+      orderId,
+      orderItemId: restored[0].id,
+      serialNumber: restored[0].serialNumber,
+      changeType: 'added',
+      snapshot: JSON.stringify({
+        serialNumber: restored[0].serialNumber,
+        isDep: restored[0].isDep,
+        depStatus: restored[0].depStatus,
+      }),
+      createdAt: now,
+    });
 
     return restored[0];
   }

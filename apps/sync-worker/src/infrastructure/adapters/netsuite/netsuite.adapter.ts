@@ -46,6 +46,30 @@ export class NetsuiteAdapter implements DataSourcePort {
     this.tokenExpiresAt = 0;
   }
 
+  /**
+   * Build a configured adapter from a credential's decrypted connection data.
+   */
+  static fromConnectionData(data: Record<string, unknown>): NetsuiteAdapter {
+    const adapter = new NetsuiteAdapter();
+    adapter.configure({
+      authType: (data['auth_type'] as 'oauth1' | 'oauth2') || 'oauth1',
+      restletHost: data['netsuite_restlet_host'] as string,
+      account: data['netsuite_account'] as string,
+      deployId: data['netsuite_deploy_id'] as number,
+      orderScriptId: data['netsuite_order_script_id'] as string,
+      accountScriptId: data['netsuite_account_script_id'] as string,
+      clientId: data['client_id'] as string,
+      certificateId: data['certificate_id'] as string,
+      privateKey: data['private_key'] as string,
+      consumerKey: data['netsuite_consumer_key'] as string,
+      consumerSecret: data['netsuite_consumer_secret'] as string,
+      token: data['netsuite_token'] as string,
+      tokenSecret: data['netsuite_token_secret'] as string,
+      realm: data['netsuite_realm'] as string,
+    });
+    return adapter;
+  }
+
   async fetchAccounts(options?: FetchOptions): Promise<FetchResult<RawAccountData>> {
     this.ensureConfigured();
 
@@ -88,6 +112,29 @@ export class NetsuiteAdapter implements DataSourcePort {
     };
   }
 
+  /**
+   * Push a DEP outcome back to the NetSuite order via the order RESTlet.
+   * Contract (same as the legacy system): PUT { order_id, dep_response, dep_status }.
+   */
+  async updateOrderDepStatus(
+    externalOrderId: string,
+    depResponse: string,
+    depStatus: string,
+  ): Promise<void> {
+    this.ensureConfigured();
+
+    await this.makeRequest(
+      'PUT',
+      this.config!.orderScriptId,
+      { realm: this.config!.account },
+      {
+        order_id: externalOrderId,
+        dep_response: depResponse,
+        dep_status: depStatus,
+      },
+    );
+  }
+
   async testConnection(): Promise<boolean> {
     try {
       this.ensureConfigured();
@@ -107,15 +154,16 @@ export class NetsuiteAdapter implements DataSourcePort {
   }
 
   private async makeRequest(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     scriptId: string,
-    params?: Record<string, string>
+    params?: Record<string, string>,
+    body?: unknown
   ): Promise<unknown> {
     this.ensureConfigured();
-    
+
     let url = `${this.config!.restletHost}?script=${scriptId}&deploy=${this.config!.deployId}`;
-    
-    if (params && method === 'GET') {
+
+    if (params) {
       const queryParams = new URLSearchParams(params);
       url += `&${queryParams.toString()}`;
     }
@@ -128,6 +176,7 @@ export class NetsuiteAdapter implements DataSourcePort {
     const response = await fetch(url, {
       method,
       headers,
+      body: method !== 'GET' && body !== undefined ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok) {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { TenantDb, orders, orderItems } from '@org/database';
 import {
@@ -173,6 +173,65 @@ export class OrderRepository implements OrderRepositoryPort {
     return this.findByExternalId(order.externalOrderId ?? '') as Promise<PersistedOrderEntity>;
   }
 
+  async markDepSubmitted(orderId: number, serialNumbers: string[]): Promise<void> {
+    const db = this.ensureDb();
+    const now = new Date();
+
+    await db.update(orders)
+      .set({ status: 'submitted', updatedAt: now })
+      .where(eq(orders.id, orderId));
+
+    if (serialNumbers.length > 0) {
+      await db.update(orderItems)
+        .set({ depStatus: 'submitted', updatedAt: now })
+        .where(and(
+          eq(orderItems.orderId, orderId),
+          inArray(orderItems.serialNumber, serialNumbers),
+        ));
+    }
+  }
+
+  async removeItemsBySerial(serialNumbers: string[]): Promise<{ orderId: number; serialNumber: string }[]> {
+    const db = this.ensureDb();
+    if (serialNumbers.length === 0) return [];
+    const now = new Date();
+
+    const rows = await db
+      .select()
+      .from(orderItems)
+      .where(inArray(orderItems.serialNumber, serialNumbers));
+    const active = rows.filter((r) => !r.deletedAt);
+
+    const removed: { orderId: number; serialNumber: string }[] = [];
+    const itemChanges: Omit<OrderItemChangeEntity, 'id' | 'createdAt'>[] = [];
+
+    for (const item of active) {
+      await db.update(orderItems)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(orderItems.id, item.id));
+
+      removed.push({ orderId: item.orderId, serialNumber: item.serialNumber });
+      itemChanges.push({
+        orderId: item.orderId,
+        orderItemId: item.id,
+        serialNumber: item.serialNumber,
+        changeType: 'removed',
+        snapshot: {
+          id: item.id,
+          serialNumber: item.serialNumber,
+          isDep: item.isDep,
+          depStatus: item.depStatus,
+        },
+      });
+    }
+
+    if (this.changeRepository && itemChanges.length > 0) {
+      await this.changeRepository.recordItemChanges(itemChanges);
+    }
+
+    return removed;
+  }
+
   async upsert(order: OrderEntity, accountId: number): Promise<{ entity: PersistedOrderEntity; created: boolean }> {
     const existing = await this.findByExternalId(order.externalOrderId);
 
@@ -251,6 +310,18 @@ export class OrderRepository implements OrderRepositoryPort {
     const db = this.ensureDb();
     const now = new Date();
 
+    // Serials that exist soft-deleted on this order were removed on
+    // purpose (a return or an operator removal). The source feed keeps
+    // listing them on the original order, so without this check every
+    // re-sync would re-insert and re-enroll them.
+    const allRows = await db
+      .select({ serialNumber: orderItems.serialNumber, deletedAt: orderItems.deletedAt })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
+    const removedSerials = new Set(
+      allRows.filter((r) => r.deletedAt).map((r) => r.serialNumber),
+    );
+
     // Create maps for efficient lookup
     const existingBySerial = new Map(
       existingItems.map(item => [item.serialNumber, item])
@@ -263,6 +334,8 @@ export class OrderRepository implements OrderRepositoryPort {
 
     // Detect added and updated items
     for (const incoming of incomingItems) {
+      if (removedSerials.has(incoming.serialNumber)) continue;
+
       const existing = existingBySerial.get(incoming.serialNumber);
 
       if (!existing) {
@@ -284,14 +357,14 @@ export class OrderRepository implements OrderRepositoryPort {
           snapshot: { ...incoming },
         });
       } else {
-        // Existing item - check for updates
+        // Existing item - check for updates.
+        // depStatus is intentionally NOT synced: it's owned by the DEP
+        // pipeline (poll scheduler / manual actions), and mappers always
+        // emit 'pending' — syncing it would revert enrolled items.
         const fieldChanges: ChangedFields = {};
 
         if (existing.isDep !== incoming.isDep) {
           fieldChanges['isDep'] = { old: existing.isDep, new: incoming.isDep };
-        }
-        if (existing.depStatus !== incoming.depStatus) {
-          fieldChanges['depStatus'] = { old: existing.depStatus, new: incoming.depStatus };
         }
 
         if (Object.keys(fieldChanges).length > 0) {
@@ -299,7 +372,6 @@ export class OrderRepository implements OrderRepositoryPort {
           await db.update(orderItems)
             .set({
               isDep: incoming.isDep,
-              depStatus: incoming.depStatus,
               updatedAt: now,
             })
             .where(eq(orderItems.id, existing.id));

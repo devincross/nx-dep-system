@@ -35,6 +35,8 @@ const checkStatusLoading = ref(false);
 const checkStatusResult = ref<any>(null);
 const expandedTransactions = ref<number[]>([]);
 const checkingTxnId = ref<number | null>(null);
+const erpPushLoading = ref(false);
+const erpPushResult = ref<{ erp: string; externalOrderId: string; depStatus: string; depResponse: string } | null>(null);
 const txnCheckResults = ref<Record<number, { status: string; errorCode?: string | null; errorMessage?: string | null }>>({});
 const txnCheckErrors = ref<Record<number, string>>({});
 
@@ -191,6 +193,19 @@ async function handleRestoreItem(item: OrderItem) {
   }
 }
 
+async function pushToErp() {
+  erpPushLoading.value = true;
+  erpPushResult.value = null;
+  try {
+    const response = await api.post(`/orders/${orderId.value}/erp/push-status`);
+    erpPushResult.value = response.data;
+  } catch (err: any) {
+    error.value = err.response?.data?.message || 'Unable to push the order status to the ERP.';
+  } finally {
+    erpPushLoading.value = false;
+  }
+}
+
 async function checkAndUpdateStatus() {
   checkStatusLoading.value = true;
   checkStatusResult.value = null;
@@ -250,10 +265,14 @@ onMounted(() => {
       <h1 class="text-h4">Order Details</h1>
       <div>
         <v-btn variant="text" @click="router.push('/orders')">Back to Orders</v-btn>
+        <v-btn variant="outlined" color="secondary" class="ml-2" :loading="erpPushLoading" prepend-icon="mdi-database-export" @click="pushToErp">Push to ERP</v-btn>
         <v-btn color="primary" :to="`/orders/${orderId}/edit`" class="ml-2">Edit Order</v-btn>
       </div>
     </div>
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
+    <v-alert v-if="erpPushResult" type="success" class="mb-4" closable @click:close="erpPushResult = null">
+      Pushed status '{{ erpPushResult.depStatus }}' to {{ erpPushResult.erp === 'zoho' ? 'Zoho' : 'NetSuite' }} for order {{ erpPushResult.externalOrderId }} ({{ erpPushResult.depResponse }}).
+    </v-alert>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
 
     <template v-if="order && !loading">
