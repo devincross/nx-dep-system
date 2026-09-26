@@ -71,8 +71,21 @@ export class DepPushChangesUseCase {
           continue;
         }
 
-        // Only process DEP-eligible orders
-        if (!order.isDep) {
+        const orderChange = changes.orderChanges[0];
+        const addedItems = changes.itemChanges.filter((i) => i.changeType === 'added');
+        const removedItems = changes.itemChanges.filter((i) => i.changeType === 'removed');
+        // Devices Apple already has on file (submitted/complete) must be
+        // returned (RE) even once the order has no active DEP items left.
+        // Returning the last enrolled device on an order flips order.isDep
+        // to false (it's recomputed from active items), so without this the
+        // skip below would drop the return and leave the device enrolled.
+        const returnableRemoved = removedItems.filter(
+          (i) => i.snapshot?.depStatus === 'submitted' || i.snapshot?.depStatus === 'complete',
+        );
+
+        // Only process DEP-eligible orders — but never skip a pending return
+        // of an already-enrolled device (see returnableRemoved above).
+        if (!order.isDep && returnableRemoved.length === 0) {
           result.skipped++;
           // Mark as synced so we don't keep retrying non-DEP orders
           await this.markSynced(changeRepo, changes);
@@ -90,10 +103,6 @@ export class DepPushChangesUseCase {
           result.skipped++;
           continue; // leave changes unsynced so this retries once the account is fixed
         }
-
-        const orderChange = changes.orderChanges[0];
-        const addedItems = changes.itemChanges.filter((i) => i.changeType === 'added');
-        const removedItems = changes.itemChanges.filter((i) => i.changeType === 'removed');
 
         // Determine which DEP operations to perform
         if (orderChange?.changeType === 'deleted') {
@@ -123,10 +132,15 @@ export class DepPushChangesUseCase {
           // Order fields changed → Override (OV) with current full device list
           const depItems = order.items.filter((i) => i.isDep);
           if (depItems.length === 0) {
-            // All devices removed — void instead
+            // All devices removed — void instead (covers any returns)
             await this.submitVoid(depAdapter, txnRepo, order, customerId, netsuiteAdapter);
           } else {
             await this.submitOverride(depAdapter, txnRepo, order, depItems, customerId, orderRepo, netsuiteAdapter);
+            // OV re-sends the remaining devices but does not un-assign the
+            // dropped ones — explicitly return any Apple already had on file.
+            if (returnableRemoved.length > 0) {
+              await this.submitReturn(depAdapter, txnRepo, order, returnableRemoved, customerId, netsuiteAdapter);
+            }
           }
           result.submitted++;
           await this.markSynced(changeRepo, changes);
