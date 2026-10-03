@@ -267,6 +267,7 @@ export interface SyncStatusResult {
   errorMessage?: string;
   startedAt?: string;
   completedAt?: string;
+  stale?: 'stuck_running' | 'overdue';
 }
 
 export interface SyncSummary {
