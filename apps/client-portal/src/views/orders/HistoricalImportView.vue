@@ -26,6 +26,8 @@ function stopPolling() {
   }
 }
 
+let pollFailures = 0;
+
 async function pollStatus() {
   try {
     const response = await api.get('/orders/historical-import/status');
@@ -41,8 +43,14 @@ async function pollStatus() {
       error.value = job.error || 'The import encountered an error. Please try again.';
     }
     // status === 'running' → keep polling
+    pollFailures = 0;
   } catch {
-    // Ignore poll errors, will retry on next interval
+    // Tolerate blips, but give up (and say so) if the status keeps failing
+    if (++pollFailures >= 3) {
+      stopPolling();
+      importing.value = false;
+      error.value = 'Lost contact with the server while checking the import. It may still be running — refresh the page or check your orders before starting it again.';
+    }
   }
 }
 

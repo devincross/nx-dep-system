@@ -2,7 +2,9 @@
 import { ref, onMounted, computed } from 'vue';
 import { useCredentialsStore } from '../../stores/credentials';
 import type { Credential, CredentialType } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const credentialsStore = useCredentialsStore();
 const search = ref('');
 const typeFilter = ref<CredentialType | ''>('');
@@ -62,18 +64,20 @@ async function handleDelete() {
       await credentialsStore.remove(credentialToDelete.value.id);
     }
     await credentialsStore.fetchAll();
+    notify.success(isPermanentDelete.value ? 'Connection permanently deleted.' : 'Connection disabled.');
+    deleteDialog.value = false;
   } catch (err) {
-    console.error('Delete failed:', err);
+    notify.errorFrom(err, 'Unable to delete this connection. Please try again.');
   }
-  deleteDialog.value = false;
 }
 
 async function handleRestore(id: number) {
   try {
     await credentialsStore.restore(id);
     await credentialsStore.fetchAll();
+    notify.success('Connection restored.');
   } catch (err) {
-    console.error('Restore failed:', err);
+    notify.errorFrom(err, 'Unable to restore this connection. Please try again.');
   }
 }
 
