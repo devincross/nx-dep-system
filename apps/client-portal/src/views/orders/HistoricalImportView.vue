@@ -88,8 +88,13 @@ onUnmounted(() => {
 
     <v-alert type="info" variant="tonal" class="mb-6">
       Import existing orders from your system (NetSuite or Zoho) starting from a specific date.
-      Imported orders are recorded for tracking purposes only and will <strong>not</strong> be submitted to Apple Device Enrollment.
       Use this to bring in your order history when setting up your account for the first time.
+    </v-alert>
+
+    <v-alert type="warning" variant="tonal" class="mb-6">
+      New orders created by the import are <strong>automatically submitted to Apple Device Enrollment</strong>
+      within about 10 minutes, if they contain Apple-eligible devices. Orders that already exist in the system are
+      only updated and are not re-submitted. Choose your start date carefully.
     </v-alert>
 
     <v-card>
