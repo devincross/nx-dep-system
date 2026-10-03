@@ -45,6 +45,22 @@ export class DepActionsController {
   constructor(private readonly depActionsService: DepActionsService) {}
 
   /**
+   * Check the saved DEP credentials against Apple (read-only)
+   */
+  @Post('dep/test-connection')
+  async testDepConnection(@CurrentTenant() tenant: TenantContext) {
+    return this.depActionsService.testDepConnection(tenant.db);
+  }
+
+  /**
+   * Check the saved Zoho credentials (token refresh + read of the orders module)
+   */
+  @Post('erp/zoho/test-connection')
+  async testZohoConnection(@CurrentTenant() tenant: TenantContext) {
+    return this.depActionsService.testZohoConnection(tenant.db);
+  }
+
+  /**
    * Manually enroll an order's devices in Apple DEP (OR)
    */
   @Post(':id/dep/enroll')

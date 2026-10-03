@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useCredentialsStore } from '../../stores/credentials';
+import api from '../../services/api';
 import type { Credential, CredentialType } from '../../types';
 import { useNotify } from '../../composables/useNotify';
 
@@ -68,6 +69,30 @@ async function handleDelete() {
     deleteDialog.value = false;
   } catch (err) {
     notify.errorFrom(err, 'Unable to delete this connection. Please try again.');
+  }
+}
+
+const testingId = ref<number | null>(null);
+
+// DEP and Zoho are tested against the newest active credential of that type
+const testEndpoints: Partial<Record<CredentialType, string>> = {
+  dep: '/orders/dep/test-connection',
+  zoho: '/orders/erp/zoho/test-connection',
+};
+
+async function testConnection(credential: Credential) {
+  const endpoint = testEndpoints[credential.type];
+  if (!endpoint) return;
+  testingId.value = credential.id;
+  try {
+    const { data } = await api.post<{ ok: boolean; message: string; detail?: string }>(endpoint);
+    const text = data.detail ? `${data.message} (${data.detail})` : data.message;
+    if (data.ok) notify.success(text);
+    else notify.error(text);
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to run the connection test. Please try again.');
+  } finally {
+    testingId.value = null;
   }
 }
 
@@ -139,6 +164,14 @@ onMounted(() => {
           {{ new Date(item.createdAt).toLocaleDateString() }}
         </template>
         <template v-slot:item.actions="{ item }">
+          <v-btn
+            v-if="testEndpoints[item.type] && item.status === 'current' && !item.deletedAt"
+            icon size="small" color="secondary" title="Test connection"
+            :loading="testingId === item.id"
+            @click="testConnection(item)"
+          >
+            <v-icon>mdi-connection</v-icon>
+          </v-btn>
           <v-btn icon size="small" :to="`/credentials/${item.id}/edit`" color="primary">
             <v-icon>mdi-pencil</v-icon>
           </v-btn>
