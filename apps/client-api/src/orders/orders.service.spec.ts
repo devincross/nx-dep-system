@@ -200,6 +200,31 @@ describe('OrdersService', () => {
         .mockReturnValueOnce(q([]))
         .mockReturnValueOnce(q([]));
       expect(await service.findNeedingAttention(mockDb, now)).toEqual([]);
+  describe('getActivity', () => {
+    const t = (m: number) => new Date(Date.UTC(2026, 0, 1, 0, m));
+    const chain = (rows: any[]) => ({
+      from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve(rows) }) }) }),
+    });
+
+    it('merges changes and transactions newest-first with push state', async () => {
+      // findOne: order, then its items
+      mockDb.select
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([mockOrder]) }) })
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) })
+        .mockReturnValueOnce(chain([{ changeType: 'updated', changedFields: '{"po":{},"status":{}}', syncedAt: null, createdAt: t(10) }]))
+        .mockReturnValueOnce(chain([{ changeType: 'removed', serialNumber: 'SN1', syncedAt: t(12), createdAt: t(5) }]))
+        .mockReturnValueOnce(chain([{ orderType: 'RE', status: 'error', errorMessage: 'Bad serial', createdAt: t(20) }]));
+
+      const result = await service.getActivity(mockDb, 1);
+
+      expect(result.map((e) => e.title)).toEqual([
+        'Return submitted to Apple',
+        'Order updated',
+        'Device removed: SN1',
+      ]);
+      expect(result[0]).toMatchObject({ state: 'error', detail: 'Bad serial' });
+      expect(result[1]).toMatchObject({ state: 'waiting', detail: 'Changed: po, status' });
+      expect(result[2]).toMatchObject({ state: 'sent' });
     });
   });
 

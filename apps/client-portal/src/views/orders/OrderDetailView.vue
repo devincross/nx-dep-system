@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
-import type { Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
+import type { ActivityEntry, ActivityState, Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
 import { useNotify } from '../../composables/useNotify';
 
 const notify = useNotify();
@@ -32,6 +32,9 @@ const depDetailsLoading = ref(false);
 const depDetails = ref<any>(null);
 const depDetailsError = ref('');
 const depTransactions = ref<any[]>([]);
+const activity = ref<ActivityEntry[]>([]);
+const activityLoading = ref(false);
+const activityError = ref(false);
 const depTransactionsLoading = ref(false);
 const checkStatusLoading = ref(false);
 const checkStatusResult = ref<any>(null);
@@ -130,10 +133,37 @@ async function loadOrder() {
   error.value = '';
   try {
     order.value = await ordersStore.fetchOne(orderId.value);
+    loadActivity(); // removes/restores/edits create changes worth showing
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to load order.';
   } finally {
     loading.value = false;
+  }
+}
+
+const activityStates: Record<ActivityState, { label: string; color: string }> = {
+  waiting: { label: 'Waiting to send', color: 'orange' },
+  sent: { label: 'Sent', color: 'success' },
+  in_progress: { label: 'Awaiting Apple', color: 'blue' },
+  complete: { label: 'Complete', color: 'success' },
+  error: { label: 'Error', color: 'error' },
+};
+
+const activityIcons: Record<ActivityEntry['kind'], string> = {
+  order_change: 'mdi-file-document-edit-outline',
+  item_change: 'mdi-barcode',
+  transaction: 'mdi-apple',
+};
+
+async function loadActivity() {
+  activityLoading.value = true;
+  activityError.value = false;
+  try {
+    activity.value = (await api.get<ActivityEntry[]>(`/orders/${orderId.value}/activity`)).data;
+  } catch {
+    activityError.value = true;
+  } finally {
+    activityLoading.value = false;
   }
 }
 
@@ -156,6 +186,7 @@ async function loadDepTransactions() {
   try {
     const response = await api.get(`/orders/${orderId.value}/dep/status`);
     depTransactions.value = response.data.transactions ?? [];
+    loadActivity();
   } catch (err) {
     notify.errorFrom(err, 'Unable to load enrollment transactions. Please refresh to try again.');
   } finally {
@@ -451,6 +482,38 @@ onMounted(() => {
                   <v-btn v-else icon size="small" @click="confirmDeleteItem(item)" color="error"><v-icon>mdi-delete</v-icon></v-btn>
                 </template>
               </v-data-table>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <!-- Activity -->
+      <v-row class="mt-4">
+        <v-col cols="12">
+          <v-card>
+            <v-card-title class="d-flex justify-space-between align-center">
+              Activity
+              <v-btn size="small" variant="outlined" :loading="activityLoading" @click="loadActivity" prepend-icon="mdi-refresh">Refresh</v-btn>
+            </v-card-title>
+            <v-card-text>
+              <v-alert v-if="activityError" type="warning" variant="tonal" density="compact">
+                Unable to load activity right now. Please refresh to try again.
+              </v-alert>
+              <v-list v-else-if="activity.length > 0" density="compact">
+                <v-list-item v-for="(entry, i) in activity" :key="i">
+                  <template v-slot:prepend><v-icon size="small" class="mr-3">{{ activityIcons[entry.kind] }}</v-icon></template>
+                  <v-list-item-title>{{ entry.title }}</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ entry.at ? new Date(entry.at).toLocaleString() : '' }}<span v-if="entry.detail"> · {{ entry.detail }}</span>
+                  </v-list-item-subtitle>
+                  <template v-slot:append>
+                    <v-chip :color="activityStates[entry.state].color" size="small">{{ activityStates[entry.state].label }}</v-chip>
+                  </template>
+                </v-list-item>
+              </v-list>
+              <div v-else-if="!activityLoading" class="text-center text-grey pa-4">
+                No activity recorded for this order yet.
+              </div>
             </v-card-text>
           </v-card>
         </v-col>

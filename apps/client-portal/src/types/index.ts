@@ -121,6 +121,16 @@ export interface ReturnedOrderItem extends OrderItem {
   returnedAt: string;
 }
 
+export type ActivityState = 'waiting' | 'sent' | 'in_progress' | 'complete' | 'error';
+
+export interface ActivityEntry {
+  kind: 'order_change' | 'item_change' | 'transaction';
+  at: string | null;
+  title: string;
+  detail: string | null;
+  state: ActivityState;
+}
+
 export interface Order {
   id: number;
   orderId: string;
