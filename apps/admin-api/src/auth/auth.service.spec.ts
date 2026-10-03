@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, ConflictException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 
@@ -147,6 +147,30 @@ describe('AuthService', () => {
       };
 
       await expect(service.create(createDto)).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('register', () => {
+    it('is closed once any admin exists', async () => {
+      const limit = jest.fn().mockResolvedValue([{ id: 'existing' }]);
+      mockDb.select.mockReturnValueOnce({ from: () => ({ limit }) });
+
+      await expect(
+        service.register({ name: 'Eve', email: 'eve@evil.com', password: 'password1' } as any),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockDb.insert).not.toHaveBeenCalled();
+    });
+
+    it('bootstraps the very first admin when none exist', async () => {
+      const limit = jest.fn().mockResolvedValue([]);
+      mockDb.select.mockReturnValueOnce({ from: () => ({ limit }) });
+      // create(): email check finds nothing, then the read-back finds the new user
+      mockDb.where.mockResolvedValueOnce([]).mockResolvedValueOnce([mockUser]);
+
+      const result = await service.register({ name: 'First', email: 'first@x.com', password: 'password1' } as any);
+
+      expect(mockDb.insert).toHaveBeenCalled();
+      expect(result).not.toHaveProperty('password');
     });
   });
 

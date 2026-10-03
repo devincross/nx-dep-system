@@ -24,6 +24,7 @@ describe('AuthController', () => {
     findAll: jest.fn().mockResolvedValue([mockUser]),
     findOne: jest.fn().mockResolvedValue(mockUser),
     create: jest.fn().mockResolvedValue(mockUser),
+    register: jest.fn().mockResolvedValue(mockUser),
     update: jest.fn().mockResolvedValue(mockUser),
     remove: jest.fn().mockResolvedValue(undefined),
     login: jest.fn().mockResolvedValue(mockLoginResponse),
@@ -125,7 +126,7 @@ describe('AuthController', () => {
       const result = await controller.register(createDto);
 
       expect(result).toEqual(mockUser);
-      expect(service.create).toHaveBeenCalledWith(createDto);
+      expect(service.register).toHaveBeenCalledWith(createDto);
     });
   });
 });
