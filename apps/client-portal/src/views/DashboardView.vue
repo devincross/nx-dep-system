@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import api from '../services/api';
-import type { TenantInfo, HealthStatus, ConnectionStatus, SyncSummary, DepStatus } from '../types';
+import type { TenantInfo, HealthStatus, ConnectionStatus, SyncSummary, DepStatus, AttentionIssue, AttentionType } from '../types';
 import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
@@ -10,6 +10,9 @@ const healthStatus = ref<HealthStatus | null>(null);
 const connectionStatus = ref<ConnectionStatus | null>(null);
 const depStatus = ref<DepStatus | null>(null);
 const syncSummary = ref<SyncSummary | null>(null);
+const attention = ref<AttentionIssue[] | null>(null);
+const attentionError = ref(false);
+const ATTENTION_SHOWN = 10;
 const loading = ref(true);
 const error = ref('');
 
@@ -69,6 +72,23 @@ const syncStatusColor = computed(() => {
   }
 });
 
+const attentionLabels: Record<AttentionType, { label: string; color: string }> = {
+  order_error: { label: 'Apple error', color: 'error' },
+  missing_dep_account: { label: 'Missing Apple org ID', color: 'error' },
+  unsynced_changes: { label: 'Not sent to Apple', color: 'warning' },
+  stuck_transaction: { label: 'No result from Apple', color: 'warning' },
+};
+
+async function fetchAttention() {
+  attentionError.value = false;
+  try {
+    attention.value = (await api.get<AttentionIssue[]>('/orders/needs-attention')).data;
+  } catch {
+    attention.value = null;
+    attentionError.value = true;
+  }
+}
+
 const formatNumber = (num: number) => new Intl.NumberFormat().format(num);
 const formatDate = (dateStr?: string) => dateStr ? new Date(dateStr).toLocaleString() : 'Never';
 
@@ -97,6 +117,7 @@ async function fetchDashboardData() {
 
 onMounted(() => {
   fetchDashboardData();
+  fetchAttention();
 });
 </script>
 
@@ -106,6 +127,35 @@ onMounted(() => {
 
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
+
+    <!-- Needs Attention -->
+    <v-card class="mb-4" variant="outlined">
+      <v-card-title class="d-flex justify-space-between align-center">
+        <span><v-icon left :color="attention?.length ? 'warning' : 'success'">{{ attention?.length ? 'mdi-alert-circle' : 'mdi-check-circle' }}</v-icon> Needs Attention<span v-if="attention?.length"> ({{ attention.length }})</span></span>
+        <v-btn size="small" variant="text" icon="mdi-refresh" @click="fetchAttention" title="Refresh"></v-btn>
+      </v-card-title>
+      <v-card-text>
+        <v-alert v-if="attentionError" type="warning" variant="tonal" density="compact">
+          Unable to check for problems right now. Please refresh to try again.
+        </v-alert>
+        <div v-else-if="attention === null" class="text-grey">Checking…</div>
+        <div v-else-if="attention.length === 0" class="text-success">Everything is flowing — no orders need attention.</div>
+        <template v-else>
+          <v-list density="compact" lines="two">
+            <v-list-item v-for="(issue, i) in attention.slice(0, ATTENTION_SHOWN)" :key="`${issue.orderId}-${issue.type}-${i}`" :to="`/orders/${issue.orderId}`">
+              <template v-slot:prepend>
+                <v-chip :color="attentionLabels[issue.type].color" size="small" class="mr-3">{{ attentionLabels[issue.type].label }}</v-chip>
+              </template>
+              <v-list-item-title>Order #{{ issue.orderId }}<span v-if="issue.externalOrderId" class="text-grey"> · {{ issue.externalOrderId }}</span></v-list-item-title>
+              <v-list-item-subtitle>{{ issue.message }}<span v-if="issue.since"> Since {{ formatDate(issue.since) }}.</span></v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+          <div v-if="attention.length > ATTENTION_SHOWN" class="text-caption text-grey mt-2">
+            +{{ attention.length - ATTENTION_SHOWN }} more — resolve the above and refresh.
+          </div>
+        </template>
+      </v-card-text>
+    </v-card>
 
     <v-row v-if="!loading">
       <!-- User Info Card -->

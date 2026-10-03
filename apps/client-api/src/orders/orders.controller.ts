@@ -45,6 +45,11 @@ export class OrdersController {
     });
   }
 
+  @Get('needs-attention')
+  async findNeedingAttention(@CurrentTenant() tenant: TenantContext) {
+    return this.ordersService.findNeedingAttention(tenant.db);
+  }
+
   @Get('account/:accountId')
   async findByAccountId(
     @CurrentTenant() tenant: TenantContext,

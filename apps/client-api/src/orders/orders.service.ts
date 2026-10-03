@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, orderItemChanges, depTransactions, Order, OrderItem, OrderStatus } from '@org/database';
+import { eq, isNull, and, or, inArray, like, desc, lt, sql, type SQL } from 'drizzle-orm';
+import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, depTransactions, accounts, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -27,6 +27,22 @@ export interface ReturnedOrderItem extends OrderItem {
   returnStatus: ReturnStatus;
   returnedAt: Date | null;
 }
+
+export type AttentionType = 'order_error' | 'missing_dep_account' | 'unsynced_changes' | 'stuck_transaction';
+
+export interface AttentionIssue {
+  orderId: number;
+  externalOrderId: string | null;
+  type: AttentionType;
+  message: string;
+  since: Date | null;
+}
+
+/** Changes not pushed to Apple after this long are considered stuck (push runs every ~10 min) */
+const UNSYNCED_AFTER_MS = 30 * 60 * 1000;
+/** Apple transactions normally resolve within minutes */
+const STUCK_TXN_AFTER_MS = 60 * 60 * 1000;
+const ATTENTION_ROW_LIMIT = 500;
 
 export interface OrdersPageOptions {
   page: number;
@@ -173,6 +189,107 @@ export class OrdersService {
       .where(and(eq(orderItems.orderId, id), isNull(orderItems.deletedAt)));
 
     return { ...result[0], items };
+  }
+
+  /**
+   * Orders that need a human: Apple reported an error, changes that never got
+   * pushed (and why), or Apple transactions that never resolved. Newest problem first.
+   */
+  async findNeedingAttention(db: TenantDb, now = new Date()): Promise<AttentionIssue[]> {
+    const unsyncedCutoff = new Date(now.getTime() - UNSYNCED_AFTER_MS);
+    const stuckCutoff = new Date(now.getTime() - STUCK_TXN_AFTER_MS);
+
+    const errorOrders = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.status, 'error'))
+      .limit(ATTENTION_ROW_LIMIT);
+    const orderChangeRows = await db
+      .select()
+      .from(orderChanges)
+      .where(and(isNull(orderChanges.syncedAt), lt(orderChanges.createdAt, unsyncedCutoff)))
+      .limit(ATTENTION_ROW_LIMIT);
+    const itemChangeRows = await db
+      .select()
+      .from(orderItemChanges)
+      .where(and(isNull(orderItemChanges.syncedAt), lt(orderItemChanges.createdAt, unsyncedCutoff)))
+      .limit(ATTENTION_ROW_LIMIT);
+    const stuckTxns = await db
+      .select()
+      .from(depTransactions)
+      .where(and(inArray(depTransactions.status, ['pending', 'in_progress']), lt(depTransactions.createdAt, stuckCutoff)))
+      .limit(ATTENTION_ROW_LIMIT);
+
+    // Oldest unsynced change per order
+    const unsyncedSince = new Map<number, Date | null>();
+    for (const row of [...orderChangeRows, ...itemChangeRows]) {
+      const prev = unsyncedSince.get(row.orderId);
+      const at = row.createdAt ?? null;
+      if (prev === undefined || (at && (!prev || at < prev))) unsyncedSince.set(row.orderId, at);
+    }
+
+    const orderIds = [
+      ...new Set([
+        ...errorOrders.map((o) => o.id),
+        ...unsyncedSince.keys(),
+        ...stuckTxns.map((t) => t.orderId).filter((id): id is number => id != null),
+      ]),
+    ];
+    if (orderIds.length === 0) return [];
+
+    const orderRows = await db.select().from(orders).where(inArray(orders.id, orderIds));
+    const orderById = new Map(orderRows.map((o) => [o.id, o]));
+    const accountIds = [...new Set(orderRows.map((o) => o.accountId))];
+    const accountRows = accountIds.length
+      ? await db.select().from(accounts).where(inArray(accounts.id, accountIds))
+      : [];
+    const accountById = new Map(accountRows.map((a) => [a.id, a]));
+
+    // Latest Apple error message per order, to explain 'error' status
+    const errorTxns = errorOrders.length
+      ? await db
+          .select()
+          .from(depTransactions)
+          .where(and(
+            inArray(depTransactions.orderId, errorOrders.map((o) => o.id)),
+            inArray(depTransactions.status, ['error', 'posted_with_errors']),
+          ))
+          .orderBy(desc(depTransactions.id))
+      : [];
+    const lastError = new Map<number, string>();
+    for (const t of errorTxns) {
+      if (t.orderId != null && !lastError.has(t.orderId)) {
+        lastError.set(t.orderId, t.errorMessage || t.errorCode || 'Apple reported an error');
+      }
+    }
+
+    const issue = (orderId: number, type: AttentionType, message: string, since: Date | null): AttentionIssue => ({
+      orderId,
+      externalOrderId: orderById.get(orderId)?.externalOrderId ?? null,
+      type,
+      message,
+      since,
+    });
+
+    const issues: AttentionIssue[] = [];
+    for (const o of errorOrders) {
+      issues.push(issue(o.id, 'order_error', lastError.get(o.id) ?? 'Apple reported a problem with this order.', o.updatedAt ?? null));
+    }
+    for (const [orderId, since] of unsyncedSince) {
+      const order = orderById.get(orderId);
+      const account = order ? accountById.get(order.accountId) : undefined;
+      issues.push(
+        account && !account.depAccountId
+          ? issue(orderId, 'missing_dep_account', `Account "${account.name ?? account.externalAccountId ?? account.id}" has no Apple org ID, so changes cannot be sent to Apple.`, since)
+          : issue(orderId, 'unsynced_changes', 'Changes have not been sent to Apple yet.', since),
+      );
+    }
+    for (const t of stuckTxns) {
+      if (t.orderId == null) continue;
+      issues.push(issue(t.orderId, 'stuck_transaction', `Apple ${t.orderType} transaction has had no result for over an hour.`, t.createdAt ?? null));
+    }
+
+    return issues.sort((a, b) => (b.since?.getTime() ?? 0) - (a.since?.getTime() ?? 0));
   }
 
   /**

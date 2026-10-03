@@ -104,6 +104,16 @@ export interface OrderItem {
   deletedAt?: string;
 }
 
+export type AttentionType = 'order_error' | 'missing_dep_account' | 'unsynced_changes' | 'stuck_transaction';
+
+export interface AttentionIssue {
+  orderId: number;
+  externalOrderId: string | null;
+  type: AttentionType;
+  message: string;
+  since: string | null;
+}
+
 export type ReturnStatus = 'removed' | 'pending' | 'submitted' | 'complete' | 'error';
 
 export interface ReturnedOrderItem extends OrderItem {
