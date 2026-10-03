@@ -50,6 +50,7 @@ export {
   syncTypeEnum,
   orderChanges,
   orderItemChanges,
+  attentionDismissals,
   orderChangeTypeEnum,
   orderItemChangeTypeEnum,
   orderChangesRelations,

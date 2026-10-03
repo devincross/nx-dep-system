@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { eq, isNull, and, or, inArray, like, desc, lt, sql, type SQL } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, depTransactions, accounts, Order, OrderItem, OrderStatus } from '@org/database';
+import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, attentionDismissals, depTransactions, accounts, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -29,6 +29,8 @@ export interface ReturnedOrderItem extends OrderItem {
 }
 
 export type AttentionType = 'order_error' | 'missing_dep_account' | 'unsynced_changes' | 'stuck_transaction';
+
+export const ATTENTION_TYPES: AttentionType[] = ['order_error', 'missing_dep_account', 'unsynced_changes', 'stuck_transaction'];
 
 export interface AttentionIssue {
   orderId: number;
@@ -234,12 +236,15 @@ export class OrdersService {
       .where(and(inArray(depTransactions.status, ['pending', 'in_progress']), lt(depTransactions.createdAt, stuckCutoff)))
       .limit(ATTENTION_ROW_LIMIT);
 
-    // Oldest unsynced change per order
+    // Oldest unsynced change per order (shown), and newest (decides whether a dismissal still applies)
     const unsyncedSince = new Map<number, Date | null>();
+    const unsyncedLatest = new Map<number, Date | null>();
     for (const row of [...orderChangeRows, ...itemChangeRows]) {
       const prev = unsyncedSince.get(row.orderId);
       const at = row.createdAt ?? null;
       if (prev === undefined || (at && (!prev || at < prev))) unsyncedSince.set(row.orderId, at);
+      const last = unsyncedLatest.get(row.orderId);
+      if (last === undefined || (at && (!last || at > last))) unsyncedLatest.set(row.orderId, at);
     }
 
     const orderIds = [
@@ -270,40 +275,81 @@ export class OrdersService {
           ))
           .orderBy(desc(depTransactions.id))
       : [];
-    const lastError = new Map<number, string>();
+    const lastError = new Map<number, { message: string; at: Date | null }>();
     for (const t of errorTxns) {
       if (t.orderId != null && !lastError.has(t.orderId)) {
-        lastError.set(t.orderId, t.errorMessage || t.errorCode || 'Apple reported an error');
+        lastError.set(t.orderId, { message: t.errorMessage || t.errorCode || 'Apple reported an error', at: t.createdAt ?? null });
       }
     }
 
-    const issue = (orderId: number, type: AttentionType, message: string, since: Date | null): AttentionIssue => ({
-      orderId,
-      externalOrderId: orderById.get(orderId)?.externalOrderId ?? null,
-      type,
-      message,
-      since,
-    });
+    // latestAt = when the newest event behind the issue happened; a dismissal
+    // made after it hides the issue, a later event brings it back
+    const candidates: { issue: AttentionIssue; latestAt: Date | null }[] = [];
+    const issue = (orderId: number, type: AttentionType, message: string, since: Date | null, latestAt: Date | null = since) => {
+      candidates.push({
+        issue: { orderId, externalOrderId: orderById.get(orderId)?.externalOrderId ?? null, type, message, since },
+        latestAt,
+      });
+    };
 
-    const issues: AttentionIssue[] = [];
     for (const o of errorOrders) {
-      issues.push(issue(o.id, 'order_error', lastError.get(o.id) ?? 'Apple reported a problem with this order.', o.updatedAt ?? null));
+      const err = lastError.get(o.id);
+      issue(o.id, 'order_error', err?.message ?? 'Apple reported a problem with this order.', o.updatedAt ?? null, err?.at ?? o.updatedAt ?? null);
     }
     for (const [orderId, since] of unsyncedSince) {
       const order = orderById.get(orderId);
       const account = order ? accountById.get(order.accountId) : undefined;
-      issues.push(
-        account && !account.depAccountId
-          ? issue(orderId, 'missing_dep_account', `Account "${account.name ?? account.externalAccountId ?? account.id}" has no Apple org ID, so changes cannot be sent to Apple.`, since)
-          : issue(orderId, 'unsynced_changes', 'Changes have not been sent to Apple yet.', since),
-      );
+      const latest = unsyncedLatest.get(orderId) ?? since;
+      if (account && !account.depAccountId) {
+        issue(orderId, 'missing_dep_account', `Account "${account.name ?? account.externalAccountId ?? account.id}" has no Apple org ID, so changes cannot be sent to Apple.`, since, latest);
+      } else {
+        issue(orderId, 'unsynced_changes', 'Changes have not been sent to Apple yet.', since, latest);
+      }
     }
     for (const t of stuckTxns) {
       if (t.orderId == null) continue;
-      issues.push(issue(t.orderId, 'stuck_transaction', `Apple ${t.orderType} transaction has had no result for over an hour.`, t.createdAt ?? null));
+      issue(t.orderId, 'stuck_transaction', `Apple ${t.orderType} transaction has had no result for over an hour.`, t.createdAt ?? null);
     }
 
-    return issues.sort((a, b) => (b.since?.getTime() ?? 0) - (a.since?.getTime() ?? 0));
+    const dismissals = await db
+      .select()
+      .from(attentionDismissals)
+      .where(inArray(attentionDismissals.orderId, orderIds));
+    const isDismissed = (c: { issue: AttentionIssue; latestAt: Date | null }) =>
+      dismissals.some(
+        (d) =>
+          d.orderId === c.issue.orderId &&
+          d.type === c.issue.type &&
+          (!c.latestAt || (d.dismissedAt != null && d.dismissedAt >= c.latestAt)),
+      );
+
+    return candidates
+      .filter((c) => !isDismissed(c))
+      .map((c) => c.issue)
+      .sort((a, b) => (b.since?.getTime() ?? 0) - (a.since?.getTime() ?? 0));
+  }
+
+  /**
+   * Mark a Needs Attention item as handled another way. It stays hidden until
+   * a newer problem of the same type appears on the order.
+   */
+  async dismissAttention(
+    db: TenantDb,
+    orderId: number,
+    type: string,
+    opts: { note?: string; dismissedBy?: string | null } = {},
+  ): Promise<void> {
+    if (!ATTENTION_TYPES.includes(type as AttentionType)) {
+      throw new BadRequestException(`Unknown alert type "${type}"`);
+    }
+    await this.findOne(db, orderId);
+    await db.insert(attentionDismissals).values({
+      orderId,
+      type,
+      note: opts.note?.trim() ? opts.note.trim().slice(0, 1000) : null,
+      dismissedBy: opts.dismissedBy ?? null,
+      dismissedAt: new Date(),
+    });
   }
 
   /**

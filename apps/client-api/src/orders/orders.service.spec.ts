@@ -20,6 +20,7 @@ jest.mock('@org/database', () => ({
   },
   orderItemChanges: { id: 'id', orderId: 'orderId', changeType: 'changeType', syncedAt: 'syncedAt', createdAt: 'createdAt' },
   orderChanges: { id: 'id', orderId: 'orderId', syncedAt: 'syncedAt', createdAt: 'createdAt' },
+  attentionDismissals: { id: 'id', orderId: 'orderId' },
   accounts: { id: 'id' },
   depTransactions: { id: 'id', orderId: 'orderId', orderType: 'orderType' },
 }));
@@ -176,7 +177,8 @@ describe('OrdersService', () => {
         .mockReturnValueOnce(q([{ orderId: 4, orderType: 'RE', createdAt: old }])) // stuck txns
         .mockReturnValueOnce(q([order(1, 10, 'error'), order(2, 11), order(3, 10), order(4, 10)])) // orders
         .mockReturnValueOnce(q([{ id: 10, depAccountId: 'DEP1' }, { id: 11, depAccountId: null, name: 'Acme' }])) // accounts
-        .mockReturnValueOnce(q([{ orderId: 1, errorMessage: 'Bad customer', status: 'error' }])); // error txns
+        .mockReturnValueOnce(q([{ orderId: 1, errorMessage: 'Bad customer', status: 'error', createdAt: old }])) // error txns
+        .mockReturnValueOnce(q([])); // dismissals
 
       const issues = await service.findNeedingAttention(mockDb, now);
 
@@ -193,6 +195,41 @@ describe('OrdersService', () => {
       expect(issues.find((i) => i.orderId === 2)?.message).toContain('Acme');
     });
 
+    describe('dismissals', () => {
+      const t = (h: number) => new Date(Date.UTC(2026, 0, 1, h));
+      const errorOrder = { id: 1, accountId: 10, status: 'error', externalOrderId: 'EXT-1', updatedAt: t(1) };
+
+      function mockErrorOrder(dismissals: any[]) {
+        mockDb.select
+          .mockReturnValueOnce(q([errorOrder])) // error orders
+          .mockReturnValueOnce(q([])) // order changes
+          .mockReturnValueOnce(q([])) // item changes
+          .mockReturnValueOnce(q([])) // stuck txns
+          .mockReturnValueOnce(q([errorOrder])) // orders
+          .mockReturnValueOnce(q([{ id: 10, depAccountId: 'D' }])) // accounts
+          .mockReturnValueOnce(q([{ orderId: 1, errorMessage: 'Bad serial', status: 'error', createdAt: t(2) }])) // error txns
+          .mockReturnValueOnce(q(dismissals)); // dismissals
+      }
+
+      it('hides an issue dismissed after its latest event', async () => {
+        mockErrorOrder([{ orderId: 1, type: 'order_error', dismissedAt: t(3) }]);
+        expect(await service.findNeedingAttention(mockDb, t(5))).toEqual([]);
+      });
+
+      it('brings the issue back when a newer problem occurs after the dismissal', async () => {
+        mockErrorOrder([{ orderId: 1, type: 'order_error', dismissedAt: t(1) }]);
+        expect(await service.findNeedingAttention(mockDb, t(5))).toHaveLength(1);
+      });
+
+      it('does not let a dismissal of one type hide another type or order', async () => {
+        mockErrorOrder([
+          { orderId: 1, type: 'unsynced_changes', dismissedAt: t(4) },
+          { orderId: 2, type: 'order_error', dismissedAt: t(4) },
+        ]);
+        expect(await service.findNeedingAttention(mockDb, t(5))).toHaveLength(1);
+      });
+    });
+
     it('returns nothing when everything is healthy', async () => {
       mockDb.select
         .mockReturnValueOnce(q([]))
@@ -200,6 +237,35 @@ describe('OrdersService', () => {
         .mockReturnValueOnce(q([]))
         .mockReturnValueOnce(q([]));
       expect(await service.findNeedingAttention(mockDb, now)).toEqual([]);
+    });
+  });
+
+  describe('dismissAttention', () => {
+    let inserted: any[];
+    beforeEach(() => {
+      inserted = [];
+      mockDb.insert.mockReturnValue({ values: (v: any) => { inserted.push(v); return Promise.resolve([{ insertId: BigInt(1) }]); } });
+    });
+    const orderExists = () =>
+      mockDb.select
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([mockOrder]) }) })
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) });
+
+    it('records who dismissed what, with a trimmed note', async () => {
+      orderExists();
+      await service.dismissAttention(mockDb, 1, 'order_error', { note: '  fixed in ABM  ', dismissedBy: 'a@b.com' });
+      expect(inserted).toEqual([expect.objectContaining({ orderId: 1, type: 'order_error', note: 'fixed in ABM', dismissedBy: 'a@b.com' })]);
+    });
+
+    it('rejects an unknown alert type without writing', async () => {
+      await expect(service.dismissAttention(mockDb, 1, 'bogus')).rejects.toThrow('Unknown alert type');
+      expect(inserted).toEqual([]);
+    });
+
+    it('rejects an order that does not exist', async () => {
+      mockDb.select.mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) });
+      await expect(service.dismissAttention(mockDb, 999, 'order_error')).rejects.toThrow(NotFoundException);
+      expect(inserted).toEqual([]);
     });
   });
 
