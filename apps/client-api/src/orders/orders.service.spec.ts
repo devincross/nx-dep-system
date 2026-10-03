@@ -200,6 +200,9 @@ describe('OrdersService', () => {
         .mockReturnValueOnce(q([]))
         .mockReturnValueOnce(q([]));
       expect(await service.findNeedingAttention(mockDb, now)).toEqual([]);
+    });
+  });
+
   describe('getActivity', () => {
     const t = (m: number) => new Date(Date.UTC(2026, 0, 1, 0, m));
     const chain = (rows: any[]) => ({
