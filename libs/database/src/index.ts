@@ -104,6 +104,7 @@ export {
 } from './tenant/connection-manager.js';
 
 export type { TenantDb } from './tenant/connection-manager.js';
+export { recordErpWriteback } from './tenant/erp-writeback.js';
 
 // Migration utilities
 export { migrateLandlordDb, migrateTenantDb } from './migrate.js';

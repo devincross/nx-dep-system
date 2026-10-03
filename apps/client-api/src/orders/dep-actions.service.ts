@@ -8,6 +8,7 @@ import {
   orderItems,
   accounts,
   depTransactions,
+  recordErpWriteback,
 } from '@org/database';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
@@ -815,13 +816,19 @@ export class DepActionsService {
     const metadata = tenant.tenant.metadata ? JSON.parse(tenant.tenant.metadata) : {};
     const erp: 'netsuite' | 'zoho' = metadata.connectionType || 'netsuite';
 
-    if (erp === 'zoho') {
-      await this.pushDepStatusToZoho(db, order.externalOrderId, depResponse, depStatus);
-    } else {
-      const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
-      if (!cred) throw new BadRequestException('No active NetSuite credentials configured');
-      await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, order.externalOrderId, depResponse, depStatus);
+    try {
+      if (erp === 'zoho') {
+        await this.pushDepStatusToZoho(db, order.externalOrderId, depResponse, depStatus);
+      } else {
+        const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
+        if (!cred) throw new BadRequestException('No active NetSuite credentials configured');
+        await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, order.externalOrderId, depResponse, depStatus);
+      }
+    } catch (err) {
+      await recordErpWriteback(db, { orderId }, err instanceof Error ? err.message : String(err));
+      throw err;
     }
+    await recordErpWriteback(db, { orderId }, null);
 
     this.logger.log(`Pushed order ${orderId} state '${depStatus}' to ${erp} (${order.externalOrderId})`);
     return { erp, orderId, externalOrderId: order.externalOrderId, depStatus, depResponse };
@@ -854,9 +861,11 @@ export class DepActionsService {
       const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
       if (!cred) return;
       await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, externalOrderId, depResponse, depStatus);
+      await recordErpWriteback(db, { externalOrderId }, null);
       this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
     } catch (err) {
       this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${err}`);
+      await recordErpWriteback(db, { externalOrderId }, `NetSuite write-back failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 
