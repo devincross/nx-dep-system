@@ -3,8 +3,10 @@ import { ref, onMounted, computed } from 'vue';
 import api from '../services/api';
 import type { TenantInfo, HealthStatus, ConnectionStatus, SyncSummary, SyncStatusResult, DepStatus, AttentionIssue, AttentionType } from '../types';
 import { useAuthStore } from '../stores/auth';
+import { useNotify } from '../composables/useNotify';
 
 const authStore = useAuthStore();
+const notify = useNotify();
 const tenantInfo = ref<TenantInfo | null>(null);
 const healthStatus = ref<HealthStatus | null>(null);
 const connectionStatus = ref<ConnectionStatus | null>(null);
@@ -101,6 +103,34 @@ const attentionLabels: Record<AttentionType, { label: string; color: string }> =
   stuck_transaction: { label: 'No result from Apple', color: 'warning' },
 };
 
+const dismissTarget = ref<AttentionIssue | null>(null);
+const dismissNote = ref('');
+const dismissing = ref(false);
+
+function askDismiss(issue: AttentionIssue) {
+  dismissTarget.value = issue;
+  dismissNote.value = '';
+}
+
+async function confirmDismiss() {
+  const target = dismissTarget.value;
+  if (!target) return;
+  dismissing.value = true;
+  try {
+    await api.post(`/orders/${target.orderId}/attention/dismiss`, {
+      type: target.type,
+      note: dismissNote.value.trim() || undefined,
+    });
+    attention.value = (attention.value ?? []).filter((i) => !(i.orderId === target.orderId && i.type === target.type));
+    dismissTarget.value = null;
+    notify.success(`Marked as handled. It will reappear only if a new problem occurs on order #${target.orderId}.`);
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to dismiss this alert. Please try again.');
+  } finally {
+    dismissing.value = false;
+  }
+}
+
 async function fetchAttention() {
   attentionError.value = false;
   try {
@@ -171,6 +201,9 @@ onMounted(() => {
               </template>
               <v-list-item-title>Order #{{ issue.orderId }}<span v-if="issue.externalOrderId" class="text-grey"> · {{ issue.externalOrderId }}</span></v-list-item-title>
               <v-list-item-subtitle>{{ issue.message }}<span v-if="issue.since"> Since {{ formatDate(issue.since) }}.</span></v-list-item-subtitle>
+              <template v-slot:append>
+                <v-btn size="small" variant="text" prepend-icon="mdi-check" @click.prevent.stop="askDismiss(issue)">Mark handled</v-btn>
+              </template>
             </v-list-item>
           </v-list>
           <div v-if="attention.length > ATTENTION_SHOWN" class="text-caption text-grey mt-2">
@@ -179,6 +212,23 @@ onMounted(() => {
         </template>
       </v-card-text>
     </v-card>
+
+    <v-dialog :model-value="!!dismissTarget" max-width="450" @update:model-value="dismissTarget = null">
+      <v-card v-if="dismissTarget">
+        <v-card-title>Mark as handled</v-card-title>
+        <v-card-text>
+          <div class="mb-3">
+            Order #{{ dismissTarget.orderId }} — {{ attentionLabels[dismissTarget.type].label }}. This hides the alert; it will come back only if a new problem of the same kind occurs on this order. Nothing is sent to Apple or your ERP.
+          </div>
+          <v-text-field v-model="dismissNote" label="Note (optional)" hint="e.g. Enrolled manually in Apple Business Manager" persistent-hint maxlength="1000"></v-text-field>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="dismissTarget = null">Cancel</v-btn>
+          <v-btn color="primary" :loading="dismissing" @click="confirmDismiss">Mark handled</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <v-row v-if="!loading">
       <!-- User Info Card -->

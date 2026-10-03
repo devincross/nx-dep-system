@@ -16,6 +16,7 @@ import type { OrderStatus } from '@org/database';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { JwtAuthGuard } from '../auth/guards/index.js';
+import { CurrentUser } from '../auth/decorators/index.js';
 import { OrdersService } from './orders.service.js';
 import {
   CreateOrderDto,
@@ -48,6 +49,17 @@ export class OrdersController {
   @Get('needs-attention')
   async findNeedingAttention(@CurrentTenant() tenant: TenantContext) {
     return this.ordersService.findNeedingAttention(tenant.db);
+  }
+
+  @Post(':id/attention/dismiss')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async dismissAttention(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { type: string; note?: string },
+    @CurrentUser('email') email: string | null,
+  ) {
+    await this.ordersService.dismissAttention(tenant.db, id, body.type, { note: body.note, dismissedBy: email });
   }
 
   @Get('account/:accountId')

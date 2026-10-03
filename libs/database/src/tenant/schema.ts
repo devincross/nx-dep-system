@@ -274,6 +274,24 @@ export const orderItemChanges = mysqlTable(
   ]
 );
 
+// Needs Attention items a user has marked as handled another way. A dismissal
+// hides an issue of that type on that order until a newer problem of the same
+// type arises (the issue's latest event is after dismissed_at).
+export const attentionDismissals = mysqlTable(
+  'attention_dismissals',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    orderId: bigint('order_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => orders.id),
+    type: varchar('type', { length: 64 }).notNull(),
+    note: text('note'),
+    dismissedBy: varchar('dismissed_by', { length: 255 }),
+    dismissedAt: timestamp('dismissed_at').defaultNow(),
+  },
+  (table) => [index('attention_dismissals_order_id_idx').on(table.orderId)]
+);
+
 // Relations for change tables
 export const orderChangesRelations = relations(orderChanges, ({ one }) => ({
   order: one(orders, {
