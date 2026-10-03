@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { useCredentialsStore } from '../../stores/credentials';
 import api from '../../services/api';
 import type { CredentialType, CredentialStatus, Credential } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const route = useRoute();
 const router = useRouter();
 const credentialsStore = useCredentialsStore();
@@ -469,6 +471,7 @@ async function handleSubmit() {
     } else {
       await credentialsStore.create({ type: type.value, status: status.value, connectionData: data });
     }
+    notify.success(isEdit.value ? 'Connection updated.' : 'Connection created.');
     router.push('/credentials');
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to save this connection. Please check your entries and try again.';

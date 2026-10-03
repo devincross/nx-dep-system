@@ -26,6 +26,8 @@ function stopPolling() {
   }
 }
 
+let pollFailures = 0;
+
 async function pollStatus() {
   try {
     const response = await api.get('/orders/historical-import/status');
@@ -41,8 +43,14 @@ async function pollStatus() {
       error.value = job.error || 'The import encountered an error. Please try again.';
     }
     // status === 'running' → keep polling
+    pollFailures = 0;
   } catch {
-    // Ignore poll errors, will retry on next interval
+    // Tolerate blips, but give up (and say so) if the status keeps failing
+    if (++pollFailures >= 3) {
+      stopPolling();
+      importing.value = false;
+      error.value = 'Lost contact with the server while checking the import. It may still be running — refresh the page or check your orders before starting it again.';
+    }
   }
 }
 
@@ -88,8 +96,13 @@ onUnmounted(() => {
 
     <v-alert type="info" variant="tonal" class="mb-6">
       Import existing orders from your system (NetSuite or Zoho) starting from a specific date.
-      Imported orders are recorded for tracking purposes only and will <strong>not</strong> be submitted to Apple Device Enrollment.
       Use this to bring in your order history when setting up your account for the first time.
+    </v-alert>
+
+    <v-alert type="warning" variant="tonal" class="mb-6">
+      New orders created by the import are <strong>automatically submitted to Apple Device Enrollment</strong>
+      within about 10 minutes, if they contain Apple-eligible devices. Orders that already exist in the system are
+      only updated and are not re-submitted. Choose your start date carefully.
     </v-alert>
 
     <v-card>

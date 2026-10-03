@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { RouterView, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { notification } from '../composables/useNotify';
 
 const drawer = ref(true);
 const router = useRouter();
@@ -93,6 +94,19 @@ function logout() {
         <RouterView />
       </v-main>
     </template>
+
+    <v-snackbar
+      v-model="notification.show"
+      :color="notification.color"
+      :timeout="notification.color === 'error' ? 8000 : 4000"
+      location="bottom right"
+      multi-line
+    >
+      {{ notification.message }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="notification.show = false">Close</v-btn>
+      </template>
+    </v-snackbar>
   </v-app>
 </template>
 

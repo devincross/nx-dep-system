@@ -18,7 +18,9 @@ jest.mock('@org/database', () => ({
     depStatus: 'depStatus',
     deletedAt: 'deletedAt',
   },
-  orderItemChanges: { id: 'id', orderId: 'orderId', changeType: 'changeType' },
+  orderItemChanges: { id: 'id', orderId: 'orderId', changeType: 'changeType', syncedAt: 'syncedAt', createdAt: 'createdAt' },
+  orderChanges: { id: 'id', orderId: 'orderId', syncedAt: 'syncedAt', createdAt: 'createdAt' },
+  accounts: { id: 'id' },
   depTransactions: { id: 'id', orderId: 'orderId', orderType: 'orderType' },
 }));
 
@@ -150,6 +152,54 @@ describe('OrdersService', () => {
       await expect(service.findOne(mockDb, 999)).rejects.toThrow(
         NotFoundException
       );
+    });
+  });
+
+  describe('findNeedingAttention', () => {
+    const now = new Date('2026-01-02T00:00:00Z');
+    const old = new Date('2026-01-01T00:00:00Z');
+    const q = (rows: any[]) => {
+      const p: any = Promise.resolve(rows);
+      p.limit = () => Promise.resolve(rows);
+      p.orderBy = () => Promise.resolve(rows);
+      return { from: () => ({ where: () => p }) };
+    };
+
+    it('explains error orders, missing Apple org IDs, unsynced changes and stuck transactions', async () => {
+      const order = (id: number, accountId: number, status = 'waiting') => ({
+        id, accountId, status, externalOrderId: `EXT-${id}`, updatedAt: old,
+      });
+      mockDb.select
+        .mockReturnValueOnce(q([order(1, 10, 'error')])) // error orders
+        .mockReturnValueOnce(q([{ orderId: 2, createdAt: old }])) // order changes
+        .mockReturnValueOnce(q([{ orderId: 3, createdAt: old }])) // item changes
+        .mockReturnValueOnce(q([{ orderId: 4, orderType: 'RE', createdAt: old }])) // stuck txns
+        .mockReturnValueOnce(q([order(1, 10, 'error'), order(2, 11), order(3, 10), order(4, 10)])) // orders
+        .mockReturnValueOnce(q([{ id: 10, depAccountId: 'DEP1' }, { id: 11, depAccountId: null, name: 'Acme' }])) // accounts
+        .mockReturnValueOnce(q([{ orderId: 1, errorMessage: 'Bad customer', status: 'error' }])); // error txns
+
+      const issues = await service.findNeedingAttention(mockDb, now);
+
+      expect(issues.map((i) => [i.orderId, i.type])).toEqual(
+        expect.arrayContaining([
+          [1, 'order_error'],
+          [2, 'missing_dep_account'],
+          [3, 'unsynced_changes'],
+          [4, 'stuck_transaction'],
+        ]),
+      );
+      expect(issues).toHaveLength(4);
+      expect(issues.find((i) => i.orderId === 1)?.message).toBe('Bad customer');
+      expect(issues.find((i) => i.orderId === 2)?.message).toContain('Acme');
+    });
+
+    it('returns nothing when everything is healthy', async () => {
+      mockDb.select
+        .mockReturnValueOnce(q([]))
+        .mockReturnValueOnce(q([]))
+        .mockReturnValueOnce(q([]))
+        .mockReturnValueOnce(q([]));
+      expect(await service.findNeedingAttention(mockDb, now)).toEqual([]);
     });
   });
 
