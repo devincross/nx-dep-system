@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import api from '../services/api';
-import type { TenantInfo, HealthStatus, ConnectionStatus, SyncSummary, DepStatus } from '../types';
+import type { TenantInfo, HealthStatus, ConnectionStatus, SyncSummary, SyncStatusResult, DepStatus, AttentionIssue, AttentionType } from '../types';
 import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
@@ -10,6 +10,10 @@ const healthStatus = ref<HealthStatus | null>(null);
 const connectionStatus = ref<ConnectionStatus | null>(null);
 const depStatus = ref<DepStatus | null>(null);
 const syncSummary = ref<SyncSummary | null>(null);
+const syncFetchFailed = ref(false);
+const attention = ref<AttentionIssue[] | null>(null);
+const attentionError = ref(false);
+const ATTENTION_SHOWN = 10;
 const loading = ref(true);
 const error = ref('');
 
@@ -57,17 +61,55 @@ const depStatusLabel = computed(() => {
   return depStatus.value.status;
 });
 
-const syncStatusColor = computed(() => {
-  const status = syncSummary.value?.orders?.status || syncSummary.value?.accounts?.status;
-  if (!status) return 'grey';
-  switch (status) {
-    case 'success': return 'success';
-    case 'running': return 'info';
-    case 'pending': return 'warning';
-    case 'error': return 'error';
-    default: return 'grey';
-  }
+// Collapse a sync run into what the user should see: stale runs outrank the stored status
+function syncHealth(r: SyncStatusResult | null | undefined): { label: string; color: string; rank: number } {
+  if (!r) return { label: 'Not run yet', color: 'grey', rank: 0 };
+  if (r.stale === 'stuck_running') return { label: 'Stuck', color: 'error', rank: 3 };
+  if (r.status === 'error') return { label: 'Failed', color: 'error', rank: 3 };
+  if (r.stale === 'overdue') return { label: 'Not running', color: 'warning', rank: 2 };
+  if (r.status === 'running') return { label: 'Running', color: 'info', rank: 1 };
+  if (r.status === 'pending') return { label: 'Pending', color: 'warning', rank: 1 };
+  if (r.recordsErrored > 0) return { label: 'Partial errors', color: 'warning', rank: 2 };
+  return { label: 'Healthy', color: 'success', rank: 0 };
+}
+
+const syncCards = computed(() => {
+  const summary = syncSummary.value;
+  if (!summary) return [];
+  return [
+    { key: 'accounts', title: 'Accounts Sync', icon: 'mdi-domain', noun: 'accounts', result: summary.accounts },
+    { key: 'orders', title: 'Orders Sync', icon: 'mdi-package-variant-closed', noun: 'orders', result: summary.orders },
+  ].map((c) => ({ ...c, health: syncHealth(c.result) }));
 });
+
+// Overall chip shows the worst of the two, so one failing sync can't hide behind the other
+const overallSync = computed(() => {
+  const cards = syncCards.value.filter((c) => c.result);
+  if (cards.length === 0) return { label: 'No sync yet', color: 'grey' };
+  return cards.reduce((worst, c) => (c.health.rank > worst.rank ? c.health : worst), cards[0].health);
+});
+
+const staleMessage: Record<string, string> = {
+  stuck_running: 'This sync has been running for over 30 minutes and is probably stuck. Contact support if it does not clear.',
+  overdue: 'No sync has run in over an hour. Syncing may be paused, or the connection may need attention.',
+};
+
+const attentionLabels: Record<AttentionType, { label: string; color: string }> = {
+  order_error: { label: 'Apple error', color: 'error' },
+  missing_dep_account: { label: 'Missing Apple org ID', color: 'error' },
+  unsynced_changes: { label: 'Not sent to Apple', color: 'warning' },
+  stuck_transaction: { label: 'No result from Apple', color: 'warning' },
+};
+
+async function fetchAttention() {
+  attentionError.value = false;
+  try {
+    attention.value = (await api.get<AttentionIssue[]>('/orders/needs-attention')).data;
+  } catch {
+    attention.value = null;
+    attentionError.value = true;
+  }
+}
 
 const formatNumber = (num: number) => new Intl.NumberFormat().format(num);
 const formatDate = (dateStr?: string) => dateStr ? new Date(dateStr).toLocaleString() : 'Never';
@@ -75,13 +117,14 @@ const formatDate = (dateStr?: string) => dateStr ? new Date(dateStr).toLocaleStr
 async function fetchDashboardData() {
   loading.value = true;
   error.value = '';
+  syncFetchFailed.value = false;
   try {
     const [tenantRes, healthRes, connectionRes, depRes, syncRes] = await Promise.all([
       api.get<TenantInfo>('/tenant-info'),
       api.get<HealthStatus>('/health'),
       api.get<ConnectionStatus>('/connection-status'),
       api.get<DepStatus>('/dep-status').catch(() => ({ data: null })),
-      api.get<SyncSummary>('/sync-status/summary').catch(() => ({ data: null })),
+      api.get<SyncSummary>('/sync-status/summary').catch(() => { syncFetchFailed.value = true; return { data: null }; }),
     ]);
     tenantInfo.value = tenantRes.data;
     healthStatus.value = healthRes.data;
@@ -97,6 +140,7 @@ async function fetchDashboardData() {
 
 onMounted(() => {
   fetchDashboardData();
+  fetchAttention();
 });
 </script>
 
@@ -106,6 +150,35 @@ onMounted(() => {
 
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
+
+    <!-- Needs Attention -->
+    <v-card class="mb-4" variant="outlined">
+      <v-card-title class="d-flex justify-space-between align-center">
+        <span><v-icon left :color="attention?.length ? 'warning' : 'success'">{{ attention?.length ? 'mdi-alert-circle' : 'mdi-check-circle' }}</v-icon> Needs Attention<span v-if="attention?.length"> ({{ attention.length }})</span></span>
+        <v-btn size="small" variant="text" icon="mdi-refresh" @click="fetchAttention" title="Refresh"></v-btn>
+      </v-card-title>
+      <v-card-text>
+        <v-alert v-if="attentionError" type="warning" variant="tonal" density="compact">
+          Unable to check for problems right now. Please refresh to try again.
+        </v-alert>
+        <div v-else-if="attention === null" class="text-grey">Checking…</div>
+        <div v-else-if="attention.length === 0" class="text-success">Everything is flowing — no orders need attention.</div>
+        <template v-else>
+          <v-list density="compact" lines="two">
+            <v-list-item v-for="(issue, i) in attention.slice(0, ATTENTION_SHOWN)" :key="`${issue.orderId}-${issue.type}-${i}`" :to="`/orders/${issue.orderId}`">
+              <template v-slot:prepend>
+                <v-chip :color="attentionLabels[issue.type].color" size="small" class="mr-3">{{ attentionLabels[issue.type].label }}</v-chip>
+              </template>
+              <v-list-item-title>Order #{{ issue.orderId }}<span v-if="issue.externalOrderId" class="text-grey"> · {{ issue.externalOrderId }}</span></v-list-item-title>
+              <v-list-item-subtitle>{{ issue.message }}<span v-if="issue.since"> Since {{ formatDate(issue.since) }}.</span></v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+          <div v-if="attention.length > ATTENTION_SHOWN" class="text-caption text-grey mt-2">
+            +{{ attention.length - ATTENTION_SHOWN }} more — resolve the above and refresh.
+          </div>
+        </template>
+      </v-card-text>
+    </v-card>
 
     <v-row v-if="!loading">
       <!-- User Info Card -->
@@ -252,9 +325,7 @@ onMounted(() => {
           <v-card-title>
             <v-icon left>mdi-sync</v-icon>
             Sync Status
-            <v-chip v-if="syncSummary" :color="syncStatusColor" size="small" class="ml-2">
-              {{ syncSummary.orders?.status || syncSummary.accounts?.status || 'No sync yet' }}
-            </v-chip>
+            <v-chip v-if="syncSummary" :color="overallSync.color" size="small" class="ml-2">{{ overallSync.label }}</v-chip>
           </v-card-title>
           <v-card-text>
             <v-row v-if="syncSummary">
@@ -282,45 +353,46 @@ onMounted(() => {
                   </v-card-text>
                 </v-card>
               </v-col>
-              <v-col cols="12" md="4">
+              <v-col v-for="card in syncCards" :key="card.key" cols="12" md="4">
                 <v-card variant="outlined">
-                  <v-card-title class="text-subtitle-1"><v-icon left size="small">mdi-domain</v-icon> Accounts Sync</v-card-title>
-                  <v-card-text v-if="syncSummary.accounts">
+                  <v-card-title class="text-subtitle-1 d-flex align-center">
+                    <v-icon left size="small" class="mr-1">{{ card.icon }}</v-icon> {{ card.title }}
+                    <v-chip :color="card.health.color" size="x-small" class="ml-2">{{ card.health.label }}</v-chip>
+                  </v-card-title>
+                  <v-card-text v-if="card.result">
+                    <v-alert v-if="card.result.stale" type="warning" variant="tonal" density="compact" class="mb-2">{{ staleMessage[card.result.stale] }}</v-alert>
+                    <v-alert v-if="card.result.status === 'error' || card.result.recordsErrored > 0" type="error" variant="tonal" density="compact" class="mb-2">
+                      <template v-if="card.result.errorMessage">{{ card.result.errorMessage }}</template>
+                      <template v-else>{{ card.result.recordsErrored }} {{ card.noun }} could not be processed in the last run.</template>
+                    </v-alert>
                     <v-list density="compact">
-                      <v-list-item><v-list-item-title>Last Sync</v-list-item-title><v-list-item-subtitle>{{ formatDate(syncSummary.accounts.lastSyncAt) }}</v-list-item-subtitle></v-list-item>
-                      <v-list-item><v-list-item-title>Processed</v-list-item-title><v-list-item-subtitle>{{ formatNumber(syncSummary.accounts.recordsProcessed) }}</v-list-item-subtitle></v-list-item>
+                      <v-list-item><v-list-item-title>Last Attempt</v-list-item-title><v-list-item-subtitle>{{ formatDate(card.result.lastSyncAt) }}</v-list-item-subtitle></v-list-item>
+                      <v-list-item><v-list-item-title>Last Success</v-list-item-title><v-list-item-subtitle>{{ formatDate(card.result.lastSuccessAt) }}</v-list-item-subtitle></v-list-item>
+                      <v-list-item>
+                        <v-list-item-title>New / Processed</v-list-item-title>
+                        <v-list-item-subtitle>
+                          <strong :class="card.result.recordsCreated + card.result.recordsUpdated > 0 ? 'text-success' : ''">{{ formatNumber(card.result.recordsCreated + card.result.recordsUpdated) }}</strong>
+                          / {{ formatNumber(card.result.recordsProcessed) }}
+                          <span v-if="card.result.recordsErrored > 0" class="text-error"> ({{ card.result.recordsErrored }} errors)</span>
+                          <div v-if="card.result.status === 'success' && card.result.recordsCreated + card.result.recordsUpdated === 0" class="text-caption text-grey">Nothing new to sync in the last run.</div>
+                        </v-list-item-subtitle>
+                      </v-list-item>
                       <v-list-item>
                         <v-list-item-title>Created / Updated</v-list-item-title>
                         <v-list-item-subtitle>
-                          <v-chip color="success" size="x-small" class="mr-1">+{{ syncSummary.accounts.recordsCreated }}</v-chip>
-                          <v-chip color="info" size="x-small">~{{ syncSummary.accounts.recordsUpdated }}</v-chip>
+                          <v-chip color="success" size="x-small" class="mr-1">+{{ card.result.recordsCreated }}</v-chip>
+                          <v-chip color="info" size="x-small">~{{ card.result.recordsUpdated }}</v-chip>
                         </v-list-item-subtitle>
                       </v-list-item>
                     </v-list>
                   </v-card-text>
-                  <v-card-text v-else class="text-center text-grey">No accounts have been synced yet. Data will appear here after your first sync runs.</v-card-text>
-                </v-card>
-              </v-col>
-              <v-col cols="12" md="4">
-                <v-card variant="outlined">
-                  <v-card-title class="text-subtitle-1"><v-icon left size="small">mdi-package-variant-closed</v-icon> Orders Sync</v-card-title>
-                  <v-card-text v-if="syncSummary.orders">
-                    <v-list density="compact">
-                      <v-list-item><v-list-item-title>Last Sync</v-list-item-title><v-list-item-subtitle>{{ formatDate(syncSummary.orders.lastSyncAt) }}</v-list-item-subtitle></v-list-item>
-                      <v-list-item><v-list-item-title>Processed</v-list-item-title><v-list-item-subtitle>{{ formatNumber(syncSummary.orders.recordsProcessed) }}</v-list-item-subtitle></v-list-item>
-                      <v-list-item>
-                        <v-list-item-title>Created / Updated</v-list-item-title>
-                        <v-list-item-subtitle>
-                          <v-chip color="success" size="x-small" class="mr-1">+{{ syncSummary.orders.recordsCreated }}</v-chip>
-                          <v-chip color="info" size="x-small">~{{ syncSummary.orders.recordsUpdated }}</v-chip>
-                        </v-list-item-subtitle>
-                      </v-list-item>
-                    </v-list>
-                  </v-card-text>
-                  <v-card-text v-else class="text-center text-grey">No orders have been synced yet. Data will appear here after your first sync runs.</v-card-text>
+                  <v-card-text v-else class="text-center text-grey">No {{ card.noun }} have been synced yet. Data will appear here after your first sync runs.</v-card-text>
                 </v-card>
               </v-col>
             </v-row>
+            <v-alert v-else-if="syncFetchFailed" type="warning" variant="tonal" density="compact">
+              Unable to load sync status right now. Please refresh to try again.
+            </v-alert>
             <div v-else class="text-center text-grey pa-4">
               <v-icon size="48" color="grey">mdi-sync-off</v-icon>
               <div class="mt-2">No sync data available yet.</div>

@@ -45,6 +45,7 @@ describe('OrdersController', () => {
   const mockOrdersService = {
     findPage: jest.fn(),
     findOne: jest.fn(),
+    findReturnedItems: jest.fn().mockResolvedValue([]),
     findByAccountId: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -109,7 +110,7 @@ describe('OrdersController', () => {
 
       const result = await controller.findOne(mockTenantContext as any, 1);
 
-      expect(result).toEqual(mockOrder);
+      expect(result).toEqual({ ...mockOrder, returnedItems: [] });
       expect(mockOrdersService.findOne).toHaveBeenCalledWith(mockTenantContext.db, 1);
     });
 

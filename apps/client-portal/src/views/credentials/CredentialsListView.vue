@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useCredentialsStore } from '../../stores/credentials';
+import api from '../../services/api';
 import type { Credential, CredentialType } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const credentialsStore = useCredentialsStore();
 const search = ref('');
 const typeFilter = ref<CredentialType | ''>('');
@@ -62,18 +65,44 @@ async function handleDelete() {
       await credentialsStore.remove(credentialToDelete.value.id);
     }
     await credentialsStore.fetchAll();
+    notify.success(isPermanentDelete.value ? 'Connection permanently deleted.' : 'Connection disabled.');
+    deleteDialog.value = false;
   } catch (err) {
-    console.error('Delete failed:', err);
+    notify.errorFrom(err, 'Unable to delete this connection. Please try again.');
   }
-  deleteDialog.value = false;
+}
+
+const testingId = ref<number | null>(null);
+
+// DEP and Zoho are tested against the newest active credential of that type
+const testEndpoints: Partial<Record<CredentialType, string>> = {
+  dep: '/orders/dep/test-connection',
+  zoho: '/orders/erp/zoho/test-connection',
+};
+
+async function testConnection(credential: Credential) {
+  const endpoint = testEndpoints[credential.type];
+  if (!endpoint) return;
+  testingId.value = credential.id;
+  try {
+    const { data } = await api.post<{ ok: boolean; message: string; detail?: string }>(endpoint);
+    const text = data.detail ? `${data.message} (${data.detail})` : data.message;
+    if (data.ok) notify.success(text);
+    else notify.error(text);
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to run the connection test. Please try again.');
+  } finally {
+    testingId.value = null;
+  }
 }
 
 async function handleRestore(id: number) {
   try {
     await credentialsStore.restore(id);
     await credentialsStore.fetchAll();
+    notify.success('Connection restored.');
   } catch (err) {
-    console.error('Restore failed:', err);
+    notify.errorFrom(err, 'Unable to restore this connection. Please try again.');
   }
 }
 
@@ -135,6 +164,14 @@ onMounted(() => {
           {{ new Date(item.createdAt).toLocaleDateString() }}
         </template>
         <template v-slot:item.actions="{ item }">
+          <v-btn
+            v-if="testEndpoints[item.type] && item.status === 'current' && !item.deletedAt"
+            icon size="small" color="secondary" title="Test connection"
+            :loading="testingId === item.id"
+            @click="testConnection(item)"
+          >
+            <v-icon>mdi-connection</v-icon>
+          </v-btn>
           <v-btn icon size="small" :to="`/credentials/${item.id}/edit`" color="primary">
             <v-icon>mdi-pencil</v-icon>
           </v-btn>

@@ -14,6 +14,41 @@ export interface SyncStatusResult {
   errorMessage?: string;
   startedAt?: Date;
   completedAt?: Date;
+  /**
+   * stuck_running – marked running for too long (worker likely crashed mid-sync)
+   * overdue       – nothing has run recently (worker down, sync disabled, or no credentials)
+   */
+  stale?: 'stuck_running' | 'overdue';
+}
+
+/** Syncs run every 10 minutes and normally finish in seconds–minutes */
+const STUCK_RUNNING_AFTER_MS = 30 * 60 * 1000;
+const OVERDUE_AFTER_MS = 60 * 60 * 1000;
+
+type SyncStatusRow = typeof syncStatus.$inferSelect;
+
+export function toSyncStatusResult(row: SyncStatusRow, now = new Date()): SyncStatusResult {
+  let stale: SyncStatusResult['stale'];
+  const lastActivity = row.completedAt ?? row.startedAt ?? row.createdAt;
+  if (row.status === 'running') {
+    if (row.startedAt && now.getTime() - row.startedAt.getTime() > STUCK_RUNNING_AFTER_MS) stale = 'stuck_running';
+  } else if (lastActivity && now.getTime() - lastActivity.getTime() > OVERDUE_AFTER_MS) {
+    stale = 'overdue';
+  }
+  return {
+    syncType: row.syncType,
+    status: row.status,
+    lastSyncAt: row.lastSyncAt ?? undefined,
+    lastSuccessAt: row.lastSuccessAt ?? undefined,
+    recordsProcessed: row.recordsProcessed ?? 0,
+    recordsCreated: row.recordsCreated ?? 0,
+    recordsUpdated: row.recordsUpdated ?? 0,
+    recordsErrored: row.recordsErrored ?? 0,
+    errorMessage: row.errorMessage ?? undefined,
+    startedAt: row.startedAt ?? undefined,
+    completedAt: row.completedAt ?? undefined,
+    stale,
+  };
 }
 
 export interface SyncSummary {
@@ -66,20 +101,7 @@ export class SyncStatusService {
         return null;
       }
 
-      const row = results[0];
-      return {
-        syncType: row.syncType,
-        status: row.status,
-        lastSyncAt: row.lastSyncAt ?? undefined,
-        lastSuccessAt: row.lastSuccessAt ?? undefined,
-        recordsProcessed: row.recordsProcessed ?? 0,
-        recordsCreated: row.recordsCreated ?? 0,
-        recordsUpdated: row.recordsUpdated ?? 0,
-        recordsErrored: row.recordsErrored ?? 0,
-        errorMessage: row.errorMessage ?? undefined,
-        startedAt: row.startedAt ?? undefined,
-        completedAt: row.completedAt ?? undefined,
-      };
+      return toSyncStatusResult(results[0]);
     } catch (error) {
       this.logger.error(`Error getting sync status: ${error}`);
       return null;
@@ -130,19 +152,7 @@ export class SyncStatusService {
         .orderBy(desc(syncStatus.createdAt))
         .limit(limit);
 
-      return results.map((row) => ({
-        syncType: row.syncType,
-        status: row.status,
-        lastSyncAt: row.lastSyncAt ?? undefined,
-        lastSuccessAt: row.lastSuccessAt ?? undefined,
-        recordsProcessed: row.recordsProcessed ?? 0,
-        recordsCreated: row.recordsCreated ?? 0,
-        recordsUpdated: row.recordsUpdated ?? 0,
-        recordsErrored: row.recordsErrored ?? 0,
-        errorMessage: row.errorMessage ?? undefined,
-        startedAt: row.startedAt ?? undefined,
-        completedAt: row.completedAt ?? undefined,
-      }));
+      return results.map((row) => toSyncStatusResult(row));
     } catch (error) {
       this.logger.error(`Error getting sync history: ${error}`);
       return [];

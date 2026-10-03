@@ -45,6 +45,11 @@ export class OrdersController {
     });
   }
 
+  @Get('needs-attention')
+  async findNeedingAttention(@CurrentTenant() tenant: TenantContext) {
+    return this.ordersService.findNeedingAttention(tenant.db);
+  }
+
   @Get('account/:accountId')
   async findByAccountId(
     @CurrentTenant() tenant: TenantContext,
@@ -53,12 +58,22 @@ export class OrdersController {
     return this.ordersService.findByAccountId(tenant.db, accountId);
   }
 
+  @Get(':id/activity')
+  async getActivity(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.getActivity(tenant.db, id);
+  }
+
   @Get(':id')
   async findOne(
     @CurrentTenant() tenant: TenantContext,
     @Param('id', ParseIntPipe) id: number
   ) {
-    return this.ordersService.findOne(tenant.db, id);
+    const order = await this.ordersService.findOne(tenant.db, id);
+    const returnedItems = await this.ordersService.findReturnedItems(tenant.db, id);
+    return { ...order, returnedItems };
   }
 
   @Post()

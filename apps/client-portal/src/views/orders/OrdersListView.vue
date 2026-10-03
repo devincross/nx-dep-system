@@ -3,7 +3,9 @@ import { ref, watch } from 'vue';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
 import type { Order, OrderStatus } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const ordersStore = useOrdersStore();
 const search = ref('');
 const statusFilter = ref<OrderStatus | ''>('');
@@ -15,6 +17,13 @@ const orderToDelete = ref<Order | null>(null);
 // DEP action state
 const depActionLoading = ref<number | null>(null);
 const depActionResult = ref<{ orderId: number; action: string; success: boolean; message: string } | null>(null);
+const depConfirm = ref<{ order: Order; action: 'enroll' | 'void' | 'override' } | null>(null);
+
+const depActionCopy = {
+  enroll: { title: 'Enroll devices', body: 'Submit all Apple-eligible devices on this order to Apple Device Enrollment.' },
+  override: { title: 'Override enrollment', body: "Replace Apple's device list for this order with the devices currently on it." },
+  void: { title: 'Void order', body: 'Void this order at Apple. Its devices will no longer be enrolled.' },
+};
 const depDialog = ref(false);
 const depDialogOrder = ref<Order | null>(null);
 const depReturnSerials = ref('');
@@ -80,17 +89,28 @@ function getStatusColor(status: OrderStatus): string {
 
 // ---- DEP Actions ----
 
-async function depAction(order: Order, action: 'enroll' | 'void' | 'override') {
+// Apple answers HTTP 200 even when it rejects a submission, so read `accepted`.
+// Acceptance only means the request is queued — the order status updates once
+// the poller sees Apple's final result.
+function toDepResult(orderId: number, action: string, data: { transactionId: string; accepted?: boolean; errorMessage?: string | null }) {
+  return data.accepted === false
+    ? { orderId, action, success: false, message: `Apple rejected the submission: ${data.errorMessage || 'unknown error'} (Reference: ${data.transactionId})` }
+    : { orderId, action, success: true, message: `Submitted to Apple — awaiting result, which can take several minutes. Reference: ${data.transactionId}` };
+}
+
+function depAction(order: Order, action: 'enroll' | 'void' | 'override') {
+  depConfirm.value = { order, action };
+}
+
+async function runDepAction() {
+  if (!depConfirm.value) return;
+  const { order, action } = depConfirm.value;
+  depConfirm.value = null;
   depActionLoading.value = order.id;
   depActionResult.value = null;
   try {
     const response = await api.post(`/orders/${order.id}/dep/${action}`);
-    depActionResult.value = {
-      orderId: order.id,
-      action: action.toUpperCase(),
-      success: true,
-      message: `Successfully submitted. Reference: ${response.data.transactionId}`,
-    };
+    depActionResult.value = toDepResult(order.id, action.toUpperCase(), response.data);
   } catch (err: any) {
     depActionResult.value = {
       orderId: order.id,
@@ -100,6 +120,7 @@ async function depAction(order: Order, action: 'enroll' | 'void' | 'override') {
     };
   } finally {
     depActionLoading.value = null;
+    loadOrders();
   }
 }
 
@@ -124,12 +145,7 @@ async function submitReturn() {
     const response = await api.post(`/orders/${depDialogOrder.value.id}/dep/return`, {
       serialNumbers: serialNumbers.length > 0 ? serialNumbers : undefined,
     });
-    depActionResult.value = {
-      orderId: depDialogOrder.value.id,
-      action: 'RETURN',
-      success: true,
-      message: `Return successfully submitted. Reference: ${response.data.transactionId}`,
-    };
+    depActionResult.value = toDepResult(depDialogOrder.value.id, 'RETURN', response.data);
   } catch (err: any) {
     depActionResult.value = {
       orderId: depDialogOrder.value.id,
@@ -139,6 +155,7 @@ async function submitReturn() {
     };
   } finally {
     depActionLoading.value = null;
+    loadOrders();
   }
 }
 
@@ -159,7 +176,9 @@ async function runReconcile() {
     // Statuses may have been updated to match Apple — refresh the list
     await loadOrders();
   } catch (err: any) {
-    reconcileResults.value = [];
+    reconcileDialog.value = false;
+    reconcileResults.value = null;
+    notify.errorFrom(err, 'Reconcile failed. Please try again.');
   } finally {
     reconciling.value = false;
   }
@@ -177,8 +196,11 @@ async function handleDelete() {
   try {
     await ordersStore.remove(orderToDelete.value.id);
     await loadOrders();
-  } catch (err) { /* */ }
-  deleteDialog.value = false;
+    notify.success('Order deleted.');
+    deleteDialog.value = false;
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to delete this order. Please try again.');
+  }
 }
 
 // No onMounted fetch needed — v-data-table-server emits update:options on
@@ -285,6 +307,22 @@ async function handleDelete() {
         </template>
       </v-data-table-server>
     </v-card>
+
+    <!-- Confirm Enroll / Override / Void -->
+    <v-dialog :model-value="!!depConfirm" max-width="450" @update:model-value="depConfirm = null">
+      <v-card v-if="depConfirm">
+        <v-card-title>{{ depActionCopy[depConfirm.action].title }}</v-card-title>
+        <v-card-text>
+          <div class="mb-2">Order #{{ depConfirm.order.id }}</div>
+          {{ depActionCopy[depConfirm.action].body }}
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="depConfirm = null">Cancel</v-btn>
+          <v-btn :color="depConfirm.action === 'void' ? 'error' : 'primary'" @click="runDepAction">Submit to Apple</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Return Dialog -->
     <v-dialog v-model="depDialog" max-width="500">

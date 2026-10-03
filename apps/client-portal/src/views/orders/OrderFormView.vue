@@ -3,7 +3,9 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
 import type { OrderStatus, CreateOrderDto, UpdateOrderDto, OrderItem } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const route = useRoute();
 const router = useRouter();
 const ordersStore = useOrdersStore();
@@ -128,6 +130,7 @@ async function handleSubmit() {
       };
       await ordersStore.create(createData);
     }
+    notify.success(isEdit.value ? 'Order updated.' : 'Order created.');
     router.push('/orders');
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Failed to save order';
@@ -222,6 +225,9 @@ onMounted(() => {
                 persistent-hint
               ></v-textarea>
               <v-checkbox v-model="newItemsAreDep" label="DEP devices" density="compact" hide-details></v-checkbox>
+              <div v-if="newItemsAreDep" class="text-caption text-grey mt-1">
+                DEP devices are submitted to Apple Device Enrollment automatically within about 10 minutes of saving.
+              </div>
             </v-col>
           </v-row>
         </v-form>

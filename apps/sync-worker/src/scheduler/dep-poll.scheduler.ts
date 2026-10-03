@@ -11,6 +11,7 @@ import {
   orders,
   orderItems,
   TenantDb,
+  recordErpWriteback,
 } from '@org/database';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
@@ -311,6 +312,7 @@ export class DepPollScheduler {
 
     try {
       await netsuite.updateOrderDepStatus(externalOrderId, depResponse, depStatus);
+      await recordErpWriteback(db, { orderId: txn.orderId }, null);
       this.logger.log(
         `Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId} (txn ${txn.transactionId})`,
       );
@@ -318,6 +320,7 @@ export class DepPollScheduler {
       this.logger.error(
         `Failed to push DEP status to NetSuite for order ${externalOrderId}: ${error}`,
       );
+      await recordErpWriteback(db, { orderId: txn.orderId }, `NetSuite write-back failed: ${error}`);
     }
   }
 

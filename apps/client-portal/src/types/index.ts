@@ -104,6 +104,33 @@ export interface OrderItem {
   deletedAt?: string;
 }
 
+export type AttentionType = 'order_error' | 'missing_dep_account' | 'unsynced_changes' | 'stuck_transaction';
+
+export interface AttentionIssue {
+  orderId: number;
+  externalOrderId: string | null;
+  type: AttentionType;
+  message: string;
+  since: string | null;
+}
+
+export type ReturnStatus = 'removed' | 'pending' | 'submitted' | 'complete' | 'error';
+
+export interface ReturnedOrderItem extends OrderItem {
+  returnStatus: ReturnStatus;
+  returnedAt: string;
+}
+
+export type ActivityState = 'waiting' | 'sent' | 'in_progress' | 'complete' | 'error';
+
+export interface ActivityEntry {
+  kind: 'order_change' | 'item_change' | 'transaction';
+  at: string | null;
+  title: string;
+  detail: string | null;
+  state: ActivityState;
+}
+
 export interface Order {
   id: number;
   orderId: string;
@@ -116,10 +143,13 @@ export interface Order {
   changes?: string;
   depOrderId?: string;
   source?: string;
+  erpSyncedAt?: string | null;
+  erpSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
   items?: OrderItem[];
+  returnedItems?: ReturnedOrderItem[];
 }
 
 export interface CreateOrderDto {
@@ -249,6 +279,7 @@ export interface SyncStatusResult {
   errorMessage?: string;
   startedAt?: string;
   completedAt?: string;
+  stale?: 'stuck_running' | 'overdue';
 }
 
 export interface SyncSummary {
