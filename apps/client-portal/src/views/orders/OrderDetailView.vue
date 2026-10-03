@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
 import type { Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const route = useRoute();
 const router = useRouter();
 const ordersStore = useOrdersStore();
@@ -154,8 +156,8 @@ async function loadDepTransactions() {
   try {
     const response = await api.get(`/orders/${orderId.value}/dep/status`);
     depTransactions.value = response.data.transactions ?? [];
-  } catch {
-    // Non-critical
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to load enrollment transactions. Please refresh to try again.');
   } finally {
     depTransactionsLoading.value = false;
   }
@@ -194,6 +196,7 @@ async function handleDeleteItem() {
   try {
     await ordersStore.removeOrderItem(order.value.id, itemToDelete.value.id);
     await loadOrder();
+    notify.success('Device removed. It will be returned from Apple on the next sync.');
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to delete item.';
   } finally {
@@ -208,6 +211,7 @@ async function handleRestoreItem(item: OrderItem) {
   try {
     await ordersStore.restoreOrderItem(order.value.id, item.id);
     await loadOrder();
+    notify.success('Device restored. It will be re-enrolled with Apple on the next sync.');
   } catch (err: any) {
     error.value = err.response?.data?.message || 'Unable to restore item.';
   } finally {

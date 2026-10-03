@@ -3,7 +3,9 @@ import { ref, watch } from 'vue';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
 import type { Order, OrderStatus } from '../../types';
+import { useNotify } from '../../composables/useNotify';
 
+const notify = useNotify();
 const ordersStore = useOrdersStore();
 const search = ref('');
 const statusFilter = ref<OrderStatus | ''>('');
@@ -174,7 +176,9 @@ async function runReconcile() {
     // Statuses may have been updated to match Apple — refresh the list
     await loadOrders();
   } catch (err: any) {
-    reconcileResults.value = [];
+    reconcileDialog.value = false;
+    reconcileResults.value = null;
+    notify.errorFrom(err, 'Reconcile failed. Please try again.');
   } finally {
     reconciling.value = false;
   }
@@ -192,8 +196,11 @@ async function handleDelete() {
   try {
     await ordersStore.remove(orderToDelete.value.id);
     await loadOrders();
-  } catch (err) { /* */ }
-  deleteDialog.value = false;
+    notify.success('Order deleted.');
+    deleteDialog.value = false;
+  } catch (err) {
+    notify.errorFrom(err, 'Unable to delete this order. Please try again.');
+  }
 }
 
 // No onMounted fetch needed — v-data-table-server emits update:options on
