@@ -256,6 +256,59 @@ describe('OrdersService', () => {
     });
   });
 
+
+  describe('change recording for DEP enrollment', () => {
+    const tables = jest.requireMock('@org/database');
+    const sel = (rows: any[]) => ({ from: () => ({ where: () => Promise.resolve(rows) }) });
+    let inserted: { table: unknown; values: any }[];
+
+    beforeEach(() => {
+      inserted = [];
+      mockDb.insert.mockImplementation((table: unknown) => ({
+        values: (values: any) => {
+          inserted.push({ table, values });
+          return Promise.resolve([{ insertId: BigInt(inserted.length) }]);
+        },
+      }));
+    });
+
+    const changeRows = (table: unknown) => inserted.filter((i) => i.table === table).flatMap((i) => i.values);
+
+    it('records one created change and added item changes when an order is created in the portal', async () => {
+      mockDb.select
+        .mockReturnValueOnce(sel([])) // serial uniqueness
+        .mockReturnValueOnce(sel([mockOrderItem])) // items after insert
+        .mockReturnValueOnce(sel([mockOrderItem])) // items to record
+        .mockReturnValueOnce(sel([mockOrder])) // findOne order
+        .mockReturnValueOnce(sel([mockOrderItem])); // findOne items
+
+      await service.create(mockDb, {
+        orderId: mockOrder.orderId, accountId: 1, status: 'waiting' as const,
+        items: [{ serialNumber: 'SN123456', isDep: true, depStatus: 'pending' as const }],
+      });
+
+      expect(changeRows(tables.orderChanges)).toEqual([expect.objectContaining({ changeType: 'created' })]);
+      // exactly one 'added' row — createOrderItems must not double-record
+      expect(changeRows(tables.orderItemChanges)).toEqual([
+        expect.objectContaining({ changeType: 'added', serialNumber: 'SN123456' }),
+      ]);
+    });
+
+    it('records an added change for devices added to an existing order', async () => {
+      // insert ids are 1-based by call order, so the new item gets id 1
+      mockDb.select
+        .mockReturnValueOnce(sel([])) // serial uniqueness
+        .mockReturnValueOnce(sel([{ ...mockOrderItem, id: 1, serialNumber: 'NEW1' }]));
+
+      await service.createOrderItems(mockDb, 1, [{ serialNumber: 'NEW1', isDep: true, depStatus: 'pending' as const }]);
+
+      expect(changeRows(tables.orderChanges)).toEqual([]);
+      expect(changeRows(tables.orderItemChanges)).toEqual([
+        expect.objectContaining({ orderItemId: 1, serialNumber: 'NEW1', changeType: 'added' }),
+      ]);
+    });
+  });
+
   describe('create', () => {
     it('should create a new order with items', async () => {
       // Insert order
@@ -277,6 +330,11 @@ describe('OrdersService', () => {
         .mockReturnValueOnce({
           from: jest.fn().mockReturnValue({
             where: jest.fn().mockResolvedValue([mockOrderItem]), // Created items
+          }),
+        })
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockResolvedValue([mockOrderItem]), // Items to record as added
           }),
         })
         .mockReturnValueOnce({
