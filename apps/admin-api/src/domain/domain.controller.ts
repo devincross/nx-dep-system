@@ -9,11 +9,14 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { DomainService } from './domain.service.js';
 import { CreateDomainDto, UpdateDomainDto } from './dto/index.js';
 
 @Controller('domains')
+@UseGuards(JwtAuthGuard)
 export class DomainController {
   constructor(private readonly domainService: DomainService) {}
 

@@ -9,13 +9,16 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { TenantService } from './tenant.service.js';
 import { CreateTenantDto, UpdateTenantDto } from './dto/index.js';
 import { migrateLandlordDb, migrateTenantDb, getLandlordDb, tenants, domains, getTenantConnection, orderItems, orders } from '@org/database';
 import { sql, like, eq, and, isNull, isNotNull, notLike } from 'drizzle-orm';
 
 @Controller('tenants')
+@UseGuards(JwtAuthGuard)
 export class TenantController {
   private readonly logger = new Logger(TenantController.name);
 

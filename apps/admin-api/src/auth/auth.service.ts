@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq } from 'drizzle-orm';
@@ -49,6 +50,20 @@ export class AuthService {
     }
 
     return result[0];
+  }
+
+  /**
+   * Public self-registration, open only until the first admin exists (to
+   * bootstrap a fresh install). After that, admins are created by existing
+   * admins via the authenticated POST /users.
+   */
+  async register(createUserDto: CreateUserDto): Promise<Omit<LandlordUser, 'password'>> {
+    const db = getLandlordDb();
+    const existing = await db.select({ id: landlordUsers.id }).from(landlordUsers).limit(1);
+    if (existing.length > 0) {
+      throw new ForbiddenException('Registration is closed. Ask an existing admin to create your account.');
+    }
+    return this.create(createUserDto);
   }
 
   async create(createUserDto: CreateUserDto): Promise<Omit<LandlordUser, 'password'>> {
