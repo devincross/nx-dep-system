@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, orderItemChanges, depTransactions, Order, OrderItem, OrderStatus } from '@org/database';
+import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, depTransactions, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -27,6 +27,21 @@ export interface ReturnedOrderItem extends OrderItem {
   returnStatus: ReturnStatus;
   returnedAt: Date | null;
 }
+
+export type ActivityState = 'waiting' | 'sent' | 'in_progress' | 'complete' | 'error';
+
+export interface ActivityEntry {
+  kind: 'order_change' | 'item_change' | 'transaction';
+  at: Date | null;
+  title: string;
+  detail: string | null;
+  /** waiting = recorded but not yet pushed downstream; sent = pushed; the rest describe an Apple transaction */
+  state: ActivityState;
+}
+
+const TXN_LABELS: Record<string, string> = {
+  OR: 'Enrollment', RE: 'Return', VD: 'Void', OV: 'Override', SC: 'Status check',
+};
 
 export interface OrdersPageOptions {
   page: number;
@@ -173,6 +188,71 @@ export class OrdersService {
       .where(and(eq(orderItems.orderId, id), isNull(orderItems.deletedAt)));
 
     return { ...result[0], items };
+  }
+
+  /**
+   * One newest-first timeline for an order: what changed (and whether the
+   * change has been pushed yet) interleaved with the Apple transactions it
+   * produced. Status checks are omitted — they're read-only noise.
+   */
+  async getActivity(db: TenantDb, orderId: number): Promise<ActivityEntry[]> {
+    await this.findOne(db, orderId);
+    const LIMIT = 200;
+
+    const orderChangeRows = await db
+      .select()
+      .from(orderChanges)
+      .where(eq(orderChanges.orderId, orderId))
+      .orderBy(desc(orderChanges.id))
+      .limit(LIMIT);
+    const itemChangeRows = await db
+      .select()
+      .from(orderItemChanges)
+      .where(eq(orderItemChanges.orderId, orderId))
+      .orderBy(desc(orderItemChanges.id))
+      .limit(LIMIT);
+    const txnRows = await db
+      .select()
+      .from(depTransactions)
+      .where(and(eq(depTransactions.orderId, orderId), sql`${depTransactions.orderType} <> 'SC'`))
+      .orderBy(desc(depTransactions.id))
+      .limit(LIMIT);
+
+    const entries: ActivityEntry[] = [];
+    for (const c of orderChangeRows) {
+      let fields: string[] = [];
+      try { fields = Object.keys(JSON.parse(c.changedFields ?? '{}')); } catch { /* ignore */ }
+      entries.push({
+        kind: 'order_change',
+        at: c.createdAt ?? null,
+        title: `Order ${c.changeType}`,
+        detail: fields.length ? `Changed: ${fields.join(', ')}` : null,
+        state: c.syncedAt ? 'sent' : 'waiting',
+      });
+    }
+    for (const c of itemChangeRows) {
+      entries.push({
+        kind: 'item_change',
+        at: c.createdAt ?? null,
+        title: `Device ${c.changeType}: ${c.serialNumber}`,
+        detail: null,
+        state: c.syncedAt ? 'sent' : 'waiting',
+      });
+    }
+    for (const t of txnRows) {
+      entries.push({
+        kind: 'transaction',
+        at: t.createdAt ?? null,
+        title: `${TXN_LABELS[t.orderType] ?? t.orderType} submitted to Apple`,
+        detail: t.errorMessage ?? t.errorCode ?? null,
+        state:
+          t.status === 'complete' ? 'complete'
+          : t.status === 'error' || t.status === 'posted_with_errors' ? 'error'
+          : 'in_progress',
+      });
+    }
+
+    return entries.sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0));
   }
 
   /**
