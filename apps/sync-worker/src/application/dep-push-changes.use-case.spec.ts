@@ -31,6 +31,7 @@ function harness(opts: {
   const orderRepo: any = {
     findById: jest.fn().mockResolvedValue(opts.order),
     markDepSubmitted: jest.fn().mockResolvedValue(undefined),
+    recordErpWriteback: jest.fn().mockResolvedValue(undefined),
   };
   const depAdapter: any = { bulkEnrollDevices };
   const txnRepo: any = {
@@ -127,5 +128,35 @@ describe('DepPushChangesUseCase — returns un-assign devices from Apple', () =>
 
     // OV re-sends the kept device; RE un-assigns the returned one.
     expect(submittedTypes(h.bulkEnrollDevices)).toEqual(['OV', 'RE']);
+  });
+});
+
+describe('DepPushChangesUseCase — ERP write-back result is recorded', () => {
+  const useCase = new DepPushChangesUseCase();
+  const order = { id: 7, accountId: 1, isDep: true, externalOrderId: 'SO-7', items: [] };
+  const removed = {
+    id: 11, orderId: 7, orderItemId: 101, serialNumber: 'ENROLLED1', changeType: 'removed',
+    snapshot: { serialNumber: 'ENROLLED1', isDep: true, depStatus: 'complete' },
+  };
+  // '' = Apple returned no transaction id, i.e. an outright rejection
+  const rejected = () => harness({ order, itemChanges: [removed], enrollTxnId: '' });
+
+  it('records success when the rejection reaches NetSuite', async () => {
+    const h = rejected();
+    const netsuite: any = { updateOrderDepStatus: jest.fn().mockResolvedValue(undefined) };
+
+    await useCase.execute(h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, netsuite);
+
+    expect(netsuite.updateOrderDepStatus).toHaveBeenCalledWith('SO-7', expect.any(String), 'Error');
+    expect(h.orderRepo.recordErpWriteback).toHaveBeenCalledWith(7, null);
+  });
+
+  it('records the failure when NetSuite rejects the write-back', async () => {
+    const h = rejected();
+    const netsuite: any = { updateOrderDepStatus: jest.fn().mockRejectedValue(new Error('RESTlet 500')) };
+
+    await useCase.execute(h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, netsuite);
+
+    expect(h.orderRepo.recordErpWriteback).toHaveBeenCalledWith(7, expect.stringContaining('RESTlet 500'));
   });
 });

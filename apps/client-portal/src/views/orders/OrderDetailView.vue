@@ -229,6 +229,7 @@ async function pushToErp() {
     error.value = err.response?.data?.message || 'Unable to push the order status to the ERP.';
   } finally {
     erpPushLoading.value = false;
+    loadOrder(); // pick up the recorded write-back result
   }
 }
 
@@ -302,6 +303,19 @@ onMounted(() => {
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
 
     <template v-if="order && !loading">
+      <v-alert v-if="order.erpSyncError" type="warning" variant="tonal" class="mb-4">
+        <div class="d-flex align-center">
+          <div>
+            <strong>The last update to your ERP failed.</strong> {{ order.erpSyncError }}
+            <div v-if="order.erpSyncedAt" class="text-caption">Last successful update: {{ new Date(order.erpSyncedAt).toLocaleString() }}</div>
+          </div>
+          <v-spacer></v-spacer>
+          <v-btn size="small" variant="outlined" :loading="erpPushLoading" @click="pushToErp">Retry</v-btn>
+        </div>
+      </v-alert>
+      <div v-else-if="order.erpSyncedAt" class="text-caption text-grey mb-2">
+        Status last written to your ERP {{ new Date(order.erpSyncedAt).toLocaleString() }}.
+      </div>
       <!-- Order Info + Apple Enrollment Side by Side -->
       <v-row>
         <v-col cols="12" md="6">

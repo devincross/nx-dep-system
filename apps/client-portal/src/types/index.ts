@@ -133,6 +133,8 @@ export interface Order {
   changes?: string;
   depOrderId?: string;
   source?: string;
+  erpSyncedAt?: string | null;
+  erpSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
