@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, orderItemChanges, Order, OrderItem, OrderStatus } from '@org/database';
+import { TenantDb, orders, orderItems, orderItemChanges, depTransactions, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -11,6 +11,21 @@ function normalizeSerial(sn: string): string {
 // Order with items
 export interface OrderWithItems extends Order {
   items: OrderItem[];
+}
+
+/**
+ * Where a returned (soft-deleted) device is in the Apple return process:
+ *  removed   – never enrolled at Apple, so there was nothing to return
+ *  pending   – return queued, not yet sent to Apple
+ *  submitted – return (RE) sent, awaiting Apple's result
+ *  complete  – Apple confirmed the return
+ *  error     – Apple rejected the return
+ */
+export type ReturnStatus = 'removed' | 'pending' | 'submitted' | 'complete' | 'error';
+
+export interface ReturnedOrderItem extends OrderItem {
+  returnStatus: ReturnStatus;
+  returnedAt: Date | null;
 }
 
 export interface OrdersPageOptions {
@@ -25,6 +40,26 @@ export interface OrdersPage {
   total: number;
   page: number;
   limit: number;
+}
+
+function deriveReturnStatus(
+  item: OrderItem,
+  change: { snapshot: string | null; syncedAt: Date | null } | undefined,
+  txn: { status: string } | undefined,
+): ReturnStatus {
+  if (item.depStatus === 'error') return 'error';
+  if (!change) return 'removed';
+  let enrolled = false;
+  try {
+    const snap = JSON.parse(change.snapshot ?? '{}');
+    enrolled = !!snap.isDep && (snap.depStatus === 'submitted' || snap.depStatus === 'complete');
+  } catch { /* treat as not enrolled */ }
+  if (!enrolled) return 'removed';
+  if (!change.syncedAt) return 'pending';
+  if (!txn) return 'submitted';
+  if (txn.status === 'complete') return 'complete';
+  if (txn.status === 'error' || txn.status === 'posted_with_errors') return 'error';
+  return 'submitted';
 }
 
 @Injectable()
@@ -138,6 +173,46 @@ export class OrdersService {
       .where(and(eq(orderItems.orderId, id), isNull(orderItems.deletedAt)));
 
     return { ...result[0], items };
+  }
+
+  /**
+   * Soft-deleted (returned) items on an order, each with the status of its
+   * return at Apple derived from the 'removed' change and its RE/VD transaction
+   */
+  async findReturnedItems(db: TenantDb, orderId: number): Promise<ReturnedOrderItem[]> {
+    const items = await db
+      .select()
+      .from(orderItems)
+      .where(and(eq(orderItems.orderId, orderId), sql`${orderItems.deletedAt} IS NOT NULL`));
+    if (items.length === 0) return [];
+
+    const changes = await db
+      .select()
+      .from(orderItemChanges)
+      .where(and(eq(orderItemChanges.orderId, orderId), eq(orderItemChanges.changeType, 'removed')))
+      .orderBy(desc(orderItemChanges.id));
+    const txns = await db
+      .select()
+      .from(depTransactions)
+      .where(and(eq(depTransactions.orderId, orderId), inArray(depTransactions.orderType, ['RE', 'VD'])))
+      .orderBy(desc(depTransactions.id));
+
+    return items.map((item) => {
+      const change = changes.find((c) => c.orderItemId === item.id || c.serialNumber === item.serialNumber);
+      // Latest transaction created after the removal that mentions this serial
+      const txn = change
+        ? txns.find(
+            (t) =>
+              (!t.createdAt || !change.createdAt || t.createdAt >= change.createdAt) &&
+              (t.requestPayload ?? '').includes(item.serialNumber),
+          )
+        : undefined;
+      return {
+        ...item,
+        returnedAt: item.deletedAt,
+        returnStatus: deriveReturnStatus(item, change, txn),
+      };
+    });
   }
 
   /**

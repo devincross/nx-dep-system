@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
-import type { Order, OrderItem, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
+import type { Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
 
 const route = useRoute();
 const router = useRouter();
@@ -71,7 +71,8 @@ const appleDeviceMap = computed(() => {
 // Serials in Apple but not in our system
 const serialsOnlyInApple = computed(() => {
   if (!order.value?.items) return [];
-  const ourSerials = new Set(order.value.items.map((i) => i.serialNumber));
+  // Returned devices are still ours — Apple lists them until the return processes
+  const ourSerials = new Set(tableItems.value.map((i) => i.serialNumber));
   return [...appleDeviceMap.value.keys()].filter((s) => !ourSerials.has(s));
 });
 
@@ -89,6 +90,27 @@ function getStatusColor(status: OrderStatus | OrderItemDepStatus): string {
   };
   return colors[status] || 'grey';
 }
+
+const returnStatusLabels: Record<ReturnStatus, string> = {
+  removed: 'Removed',
+  pending: 'Return queued',
+  submitted: 'Return submitted',
+  complete: 'Return complete',
+  error: 'Return error',
+};
+
+function getReturnStatusColor(status: ReturnStatus): string {
+  const colors: Record<ReturnStatus, string> = {
+    removed: 'grey', pending: 'orange', submitted: 'blue', complete: 'success', error: 'error',
+  };
+  return colors[status];
+}
+
+// Active items followed by returned ones, so returns stay visible with their DEP status
+const tableItems = computed<(OrderItem | ReturnedOrderItem)[]>(() => [
+  ...(order.value?.items ?? []),
+  ...(order.value?.returnedItems ?? []),
+]);
 
 function getOrderTypeLabel(type: string): string {
   const labels: Record<string, string> = { OR: 'Enroll', RE: 'Return', VD: 'Void', OV: 'Override', SC: 'Status Check' };
@@ -378,11 +400,11 @@ onMounted(() => {
         <v-col cols="12">
           <v-card>
             <v-card-title class="d-flex justify-space-between align-center">
-              Order Items ({{ order.items?.length || 0 }})
+              Order Items ({{ order.items?.length || 0 }}<template v-if="order.returnedItems?.length">, {{ order.returnedItems.length }} returned</template>)
               <v-btn color="primary" size="small" @click="addItemDialog = true" prepend-icon="mdi-plus">Add Item</v-btn>
             </v-card-title>
             <v-card-text>
-              <v-data-table :headers="itemHeaders" :items="order.items || []" :loading="itemLoading" density="compact">
+              <v-data-table :headers="itemHeaders" :items="tableItems" :loading="itemLoading" density="compact">
                 <template v-slot:item.serialNumber="{ item }">
                   <span
                     :class="{
@@ -397,7 +419,13 @@ onMounted(() => {
                     >mdi-alert</v-icon>
                   </span>
                 </template>
-                <template v-slot:item.depStatus="{ item }"><v-chip :color="getStatusColor(item.depStatus)" size="small">{{ item.depStatus }}</v-chip></template>
+                <template v-slot:item.depStatus="{ item }">
+                  <template v-if="item.deletedAt">
+                    <v-chip color="grey" size="small" class="mr-1">Returned</v-chip>
+                    <v-chip v-if="'returnStatus' in item" :color="getReturnStatusColor(item.returnStatus)" size="small">{{ returnStatusLabels[item.returnStatus] }}</v-chip>
+                  </template>
+                  <v-chip v-else :color="getStatusColor(item.depStatus)" size="small">{{ item.depStatus }}</v-chip>
+                </template>
                 <template v-slot:item.isDep="{ item }"><v-icon :color="item.isDep ? 'success' : 'grey'">{{ item.isDep ? 'mdi-check' : 'mdi-close' }}</v-icon></template>
                 <template v-slot:item.appleStatus="{ item }">
                   <template v-if="depDetailsLoading">

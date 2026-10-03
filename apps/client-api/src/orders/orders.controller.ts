@@ -58,7 +58,9 @@ export class OrdersController {
     @CurrentTenant() tenant: TenantContext,
     @Param('id', ParseIntPipe) id: number
   ) {
-    return this.ordersService.findOne(tenant.db, id);
+    const order = await this.ordersService.findOne(tenant.db, id);
+    const returnedItems = await this.ordersService.findReturnedItems(tenant.db, id);
+    return { ...order, returnedItems };
   }
 
   @Post()

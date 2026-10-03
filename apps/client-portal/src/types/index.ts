@@ -104,6 +104,13 @@ export interface OrderItem {
   deletedAt?: string;
 }
 
+export type ReturnStatus = 'removed' | 'pending' | 'submitted' | 'complete' | 'error';
+
+export interface ReturnedOrderItem extends OrderItem {
+  returnStatus: ReturnStatus;
+  returnedAt: string;
+}
+
 export interface Order {
   id: number;
   orderId: string;
@@ -120,6 +127,7 @@ export interface Order {
   updatedAt: string;
   deletedAt?: string;
   items?: OrderItem[];
+  returnedItems?: ReturnedOrderItem[];
 }
 
 export interface CreateOrderDto {
