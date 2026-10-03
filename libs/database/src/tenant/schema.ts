@@ -155,6 +155,9 @@ export const orders = mysqlTable(
     createdAt: timestamp('created_at'),
     updatedAt: timestamp('updated_at'),
     source: varchar('source', { length: 255 }),
+    // Result of the last attempt to write DEP status back to the ERP
+    erpSyncedAt: timestamp('erp_synced_at'), // last successful write-back
+    erpSyncError: text('erp_sync_error'), // set when the latest attempt failed, cleared on success
   },
   (table) => [
     uniqueIndex('orders_external_order_id_unique').on(table.externalOrderId),

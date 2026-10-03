@@ -58,6 +58,14 @@ export class OrdersController {
     return this.ordersService.findByAccountId(tenant.db, accountId);
   }
 
+  @Get(':id/activity')
+  async getActivity(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.getActivity(tenant.db, id);
+  }
+
   @Get(':id')
   async findOne(
     @CurrentTenant() tenant: TenantContext,

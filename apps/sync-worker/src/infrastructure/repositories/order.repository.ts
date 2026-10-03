@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { TenantDb, orders, orderItems } from '@org/database';
+import { TenantDb, orders, orderItems, recordErpWriteback } from '@org/database';
 import {
   OrderRepositoryPort,
   OrderChangeRepositoryPort,
@@ -171,6 +171,10 @@ export class OrderRepository implements OrderRepositoryPort {
     await db.update(orders).set(updateData).where(eq(orders.id, id));
 
     return this.findByExternalId(order.externalOrderId ?? '') as Promise<PersistedOrderEntity>;
+  }
+
+  async recordErpWriteback(orderId: number, error?: string | null): Promise<void> {
+    await recordErpWriteback(this.ensureDb(), { orderId }, error);
   }
 
   async markDepSubmitted(orderId: number, serialNumbers: string[]): Promise<void> {

@@ -107,7 +107,7 @@ export class DepPushChangesUseCase {
         // Determine which DEP operations to perform
         if (orderChange?.changeType === 'deleted') {
           // Order deleted → Void (VD)
-          await this.submitVoid(depAdapter, txnRepo, order, customerId, netsuiteAdapter);
+          await this.submitVoid(depAdapter, txnRepo, order, customerId, netsuiteAdapter, orderRepo);
           result.submitted++;
           await this.markSynced(changeRepo, changes);
         } else if (orderChange?.changeType === 'created') {
@@ -133,13 +133,13 @@ export class DepPushChangesUseCase {
           const depItems = order.items.filter((i) => i.isDep);
           if (depItems.length === 0) {
             // All devices removed — void instead (covers any returns)
-            await this.submitVoid(depAdapter, txnRepo, order, customerId, netsuiteAdapter);
+            await this.submitVoid(depAdapter, txnRepo, order, customerId, netsuiteAdapter, orderRepo);
           } else {
             await this.submitOverride(depAdapter, txnRepo, order, depItems, customerId, orderRepo, netsuiteAdapter);
             // OV re-sends the remaining devices but does not un-assign the
             // dropped ones — explicitly return any Apple already had on file.
             if (returnableRemoved.length > 0) {
-              await this.submitReturn(depAdapter, txnRepo, order, returnableRemoved, customerId, netsuiteAdapter);
+              await this.submitReturn(depAdapter, txnRepo, order, returnableRemoved, customerId, netsuiteAdapter, orderRepo);
             }
           }
           result.submitted++;
@@ -150,7 +150,7 @@ export class DepPushChangesUseCase {
 
           // Handle removed items → Return (RE)
           if (removedItems.length > 0) {
-            await this.submitReturn(depAdapter, txnRepo, order, removedItems, customerId, netsuiteAdapter);
+            await this.submitReturn(depAdapter, txnRepo, order, removedItems, customerId, netsuiteAdapter, orderRepo);
             didSubmit = true;
           }
 
@@ -237,7 +237,7 @@ export class DepPushChangesUseCase {
         // Mirror the manual enroll flow: order + devices → submitted
         await orderRepo.markDepSubmitted(order.id, depItems.map((i) => i.serialNumber));
       } else {
-        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response);
+        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response, orderRepo);
       }
       this.logger.log(`OR submitted for order ${order.depOrderId || order.externalOrderId}: ${response.deviceEnrollmentTransactionId || 'error'}`);
     } catch (err: any) {
@@ -253,6 +253,7 @@ export class DepPushChangesUseCase {
     removedItems: OrderItemChangeEntity[],
     customerId: string,
     netsuiteAdapter: NetsuiteAdapter | null,
+    orderRepo: OrderRepositoryPort,
   ) {
     const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -288,7 +289,7 @@ export class DepPushChangesUseCase {
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
       if (!response.deviceEnrollmentTransactionId) {
-        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response);
+        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response, orderRepo);
       }
       this.logger.log(`RE submitted for order ${order.depOrderId || order.externalOrderId}: ${removedItems.length} devices`);
     } catch (err: any) {
@@ -341,7 +342,7 @@ export class DepPushChangesUseCase {
       if (response.deviceEnrollmentTransactionId) {
         await orderRepo.markDepSubmitted(order.id, depItems.map((i) => i.serialNumber));
       } else {
-        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response);
+        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response, orderRepo);
       }
       this.logger.log(`OV submitted for order ${order.depOrderId || order.externalOrderId}: ${depItems.length} devices`);
     } catch (err: any) {
@@ -356,6 +357,7 @@ export class DepPushChangesUseCase {
     order: any,
     customerId: string,
     netsuiteAdapter: NetsuiteAdapter | null,
+    orderRepo: OrderRepositoryPort,
   ) {
     const txnId = uuidv4().replace(/-/g, "").slice(0, 20);
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -386,7 +388,7 @@ export class DepPushChangesUseCase {
       });
       await this.storeRequest(txnRepo, dbTxnId, request);
       if (!response.deviceEnrollmentTransactionId) {
-        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response);
+        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response, orderRepo);
       }
       this.logger.log(`VD submitted for order ${order.depOrderId || order.externalOrderId}`);
     } catch (err: any) {
@@ -440,7 +442,7 @@ export class DepPushChangesUseCase {
       if (response.deviceEnrollmentTransactionId) {
         await orderRepo.markDepSubmitted(order.id, addedItems.map((i) => i.serialNumber));
       } else {
-        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response);
+        await this.pushRejectionToNetsuite(netsuiteAdapter, order, response, orderRepo);
       }
       this.logger.log(`OR (add devices) submitted for order ${order.depOrderId || order.externalOrderId}: ${addedItems.length} devices`);
     } catch (err: any) {
@@ -460,6 +462,7 @@ export class DepPushChangesUseCase {
     netsuiteAdapter: NetsuiteAdapter | null,
     order: any,
     response: any,
+    orderRepo: OrderRepositoryPort,
   ) {
     if (!netsuiteAdapter || !order.externalOrderId) return;
 
@@ -474,10 +477,12 @@ export class DepPushChangesUseCase {
         String(msg).slice(0, 1000),
         'Error',
       );
+      await orderRepo.recordErpWriteback(order.id, null);
     } catch (err) {
       this.logger.error(
         `Failed to push DEP rejection to NetSuite for order ${order.externalOrderId}: ${err}`,
       );
+      await orderRepo.recordErpWriteback(order.id, `NetSuite write-back failed: ${err}`);
     }
   }
 
