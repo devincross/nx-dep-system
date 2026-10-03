@@ -318,7 +318,15 @@ onMounted(() => {
                     <v-list density="compact">
                       <v-list-item><v-list-item-title>Last Attempt</v-list-item-title><v-list-item-subtitle>{{ formatDate(card.result.lastSyncAt) }}</v-list-item-subtitle></v-list-item>
                       <v-list-item><v-list-item-title>Last Success</v-list-item-title><v-list-item-subtitle>{{ formatDate(card.result.lastSuccessAt) }}</v-list-item-subtitle></v-list-item>
-                      <v-list-item><v-list-item-title>Processed</v-list-item-title><v-list-item-subtitle>{{ formatNumber(card.result.recordsProcessed) }}<span v-if="card.result.recordsErrored > 0" class="text-error"> ({{ card.result.recordsErrored }} errors)</span></v-list-item-subtitle></v-list-item>
+                      <v-list-item>
+                        <v-list-item-title>New / Processed</v-list-item-title>
+                        <v-list-item-subtitle>
+                          <strong :class="card.result.recordsCreated + card.result.recordsUpdated > 0 ? 'text-success' : ''">{{ formatNumber(card.result.recordsCreated + card.result.recordsUpdated) }}</strong>
+                          / {{ formatNumber(card.result.recordsProcessed) }}
+                          <span v-if="card.result.recordsErrored > 0" class="text-error"> ({{ card.result.recordsErrored }} errors)</span>
+                          <div v-if="card.result.status === 'success' && card.result.recordsCreated + card.result.recordsUpdated === 0" class="text-caption text-grey">Nothing new to sync in the last run.</div>
+                        </v-list-item-subtitle>
+                      </v-list-item>
                       <v-list-item>
                         <v-list-item-title>Created / Updated</v-list-item-title>
                         <v-list-item-subtitle>
