@@ -5,6 +5,7 @@ import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
 import type { ActivityEntry, ActivityState, Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
 import { useNotify } from '../../composables/useNotify';
+import { depActionCopy, toDepResult, type DepAction, type DepActionResult } from '../../composables/depActions';
 
 const notify = useNotify();
 const route = useRoute();
@@ -40,6 +41,11 @@ const checkStatusLoading = ref(false);
 const checkStatusResult = ref<any>(null);
 const expandedTransactions = ref<number[]>([]);
 const checkingTxnId = ref<number | null>(null);
+const depActionLoading = ref(false);
+const depActionResult = ref<DepActionResult | null>(null);
+const depConfirm = ref<DepAction | null>(null);
+const returnDialog = ref(false);
+const returnSerials = ref<string[]>([]);
 const erpPushLoading = ref(false);
 const erpPushResult = ref<{ erp: string; externalOrderId: string; depStatus: string; depResponse: string } | null>(null);
 const txnCheckResults = ref<Record<number, { status: string; errorCode?: string | null; errorMessage?: string | null }>>({});
@@ -250,6 +256,50 @@ async function handleRestoreItem(item: OrderItem) {
   }
 }
 
+// Active Apple-eligible serials the user can pick for a return
+const returnableSerials = computed(() =>
+  (order.value?.items ?? []).filter((i) => i.isDep && !i.deletedAt).map((i) => i.serialNumber),
+);
+
+async function runDepAction(action: 'enroll' | 'override' | 'void' | 'return', body?: object) {
+  if (!order.value) return;
+  const orderRef = order.value.id;
+  depActionLoading.value = true;
+  depActionResult.value = null;
+  try {
+    const response = await api.post(`/orders/${orderRef}/dep/${action}`, body);
+    depActionResult.value = toDepResult(orderRef, action.toUpperCase(), response.data);
+  } catch (err: any) {
+    depActionResult.value = {
+      orderId: orderRef,
+      action: action.toUpperCase(),
+      success: false,
+      message: err.response?.data?.message || err.message,
+    };
+  } finally {
+    depActionLoading.value = false;
+    loadOrder();
+    loadDepTransactions();
+  }
+}
+
+function confirmDepAction() {
+  const action = depConfirm.value;
+  depConfirm.value = null;
+  if (action) runDepAction(action);
+}
+
+function openReturnDialog() {
+  returnSerials.value = [];
+  returnDialog.value = true;
+}
+
+function submitReturn() {
+  returnDialog.value = false;
+  // No serials selected = return every enrolled device on the order
+  runDepAction('return', { serialNumbers: returnSerials.value.length > 0 ? returnSerials.value : undefined });
+}
+
 async function pushToErp() {
   erpPushLoading.value = true;
   erpPushResult.value = null;
@@ -323,15 +373,83 @@ onMounted(() => {
       <h1 class="text-h4">Order Details</h1>
       <div>
         <v-btn variant="text" @click="router.push('/orders')">Back to Orders</v-btn>
+        <v-menu>
+          <template v-slot:activator="{ props }">
+            <v-btn v-bind="props" variant="outlined" color="teal" class="ml-2" :loading="depActionLoading" prepend-icon="mdi-apple" append-icon="mdi-menu-down">Apple Actions</v-btn>
+          </template>
+          <v-list density="compact">
+            <v-list-subheader>Apple Enrollment Actions</v-list-subheader>
+            <v-list-item prepend-icon="mdi-plus-circle" @click="depConfirm = 'enroll'">
+              <v-list-item-title>Enroll Devices</v-list-item-title>
+            </v-list-item>
+            <v-list-item prepend-icon="mdi-undo" @click="openReturnDialog">
+              <v-list-item-title>Return Devices</v-list-item-title>
+            </v-list-item>
+            <v-list-item prepend-icon="mdi-swap-horizontal" @click="depConfirm = 'override'">
+              <v-list-item-title>Override Enrollment</v-list-item-title>
+            </v-list-item>
+            <v-list-item prepend-icon="mdi-cancel" @click="depConfirm = 'void'">
+              <v-list-item-title>Void Order</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
         <v-btn variant="outlined" color="secondary" class="ml-2" :loading="erpPushLoading" prepend-icon="mdi-database-export" @click="pushToErp">Push to ERP</v-btn>
         <v-btn color="primary" :to="`/orders/${orderId}/edit`" class="ml-2">Edit Order</v-btn>
       </div>
     </div>
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
+    <v-alert
+      v-if="depActionResult"
+      :type="depActionResult.success ? 'success' : 'error'"
+      variant="tonal"
+      class="mb-4"
+      closable
+      @click:close="depActionResult = null"
+    >
+      <strong>{{ depActionResult.action }}</strong>: {{ depActionResult.message }}
+    </v-alert>
     <v-alert v-if="erpPushResult" type="success" class="mb-4" closable @click:close="erpPushResult = null">
       Pushed status '{{ erpPushResult.depStatus }}' to {{ erpPushResult.erp === 'zoho' ? 'Zoho' : 'NetSuite' }} for order {{ erpPushResult.externalOrderId }} ({{ erpPushResult.depResponse }}).
     </v-alert>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
+
+    <!-- Confirm Enroll / Override / Void -->
+    <v-dialog :model-value="!!depConfirm" max-width="450" @update:model-value="depConfirm = null">
+      <v-card v-if="depConfirm">
+        <v-card-title>{{ depActionCopy[depConfirm].title }}</v-card-title>
+        <v-card-text>{{ depActionCopy[depConfirm].body }}</v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="depConfirm = null">Cancel</v-btn>
+          <v-btn :color="depConfirm === 'void' ? 'error' : 'primary'" @click="confirmDepAction">Submit to Apple</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Return devices -->
+    <v-dialog v-model="returnDialog" max-width="500">
+      <v-card>
+        <v-card-title>Return Devices</v-card-title>
+        <v-card-text>
+          <div class="text-body-2 mb-3">
+            Choose the devices to return from Apple Device Enrollment. Leave empty to return all enrolled devices on this order. Returned devices will no longer be managed through Apple enrollment.
+          </div>
+          <v-select
+            v-model="returnSerials"
+            :items="returnableSerials"
+            label="Serial Numbers"
+            multiple chips closable-chips clearable
+            hint="Leave empty to return all"
+            persistent-hint
+          ></v-select>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="returnDialog = false">Cancel</v-btn>
+          <v-btn color="warning" @click="submitReturn">Submit Return</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <template v-if="order && !loading">
       <v-alert v-if="order.erpSyncError" type="warning" variant="tonal" class="mb-4">
