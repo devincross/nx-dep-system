@@ -18,6 +18,8 @@ jest.mock('@org/database', () => ({
     depStatus: 'depStatus',
     deletedAt: 'deletedAt',
   },
+  orderItemChanges: { id: 'id', orderId: 'orderId', changeType: 'changeType' },
+  depTransactions: { id: 'id', orderId: 'orderId', orderType: 'orderType' },
 }));
 
 describe('OrdersService', () => {
@@ -81,32 +83,39 @@ describe('OrdersService', () => {
     jest.clearAllMocks();
   });
 
-  describe('findAll', () => {
-    it('should return an array of orders with items', async () => {
-      mockDb.where
-        .mockResolvedValueOnce([mockOrder]) // never used - select without where for orders
-        .mockResolvedValueOnce([mockOrderItem]);
-
-      // Override select chain for initial order fetch
-      mockDb.from.mockReturnValueOnce({
-        ...mockDb,
-        where: undefined,
-      });
+  describe('findPage', () => {
+    it('should return a page of orders with items and a total count', async () => {
+      // Count query
       mockDb.select.mockReturnValueOnce({
-        from: jest.fn().mockResolvedValue([mockOrder]),
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ total: 1 }]),
+        }),
       });
-
-      // Mock items fetch
+      // Page query
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            orderBy: jest.fn().mockReturnValue({
+              limit: jest.fn().mockReturnValue({
+                offset: jest.fn().mockResolvedValue([mockOrder]),
+              }),
+            }),
+          }),
+        }),
+      });
+      // Items query for the page
       mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockResolvedValue([mockOrderItem]),
         }),
       });
 
-      const result = await service.findAll(mockDb);
+      const result = await service.findPage(mockDb, { page: 1, limit: 25 });
 
-      expect(result).toHaveLength(1);
-      expect(result[0].items).toBeDefined();
+      expect(result.total).toBe(1);
+      expect(result.page).toBe(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].items).toEqual([mockOrderItem]);
     });
   });
 
@@ -141,6 +150,59 @@ describe('OrdersService', () => {
       await expect(service.findOne(mockDb, 999)).rejects.toThrow(
         NotFoundException
       );
+    });
+  });
+
+  describe('findReturnedItems', () => {
+    const t0 = new Date('2026-01-01T00:00:00Z');
+    const t1 = new Date('2026-01-01T01:00:00Z');
+    const returned = (id: number, serialNumber: string) => ({
+      ...mockOrderItem, id, serialNumber, deletedAt: t0,
+    });
+    const change = (orderItemId: number, serialNumber: string, snapshot: object, syncedAt: Date | null) => ({
+      orderItemId, serialNumber, snapshot: JSON.stringify(snapshot), syncedAt, createdAt: t0,
+    });
+    const enrolled = { isDep: true, depStatus: 'complete' };
+
+    function mockQueries(items: any[], changes: any[], txns: any[]) {
+      const plain = (rows: any[]) => ({ from: () => ({ where: () => Promise.resolve(rows) }) });
+      const ordered = (rows: any[]) => ({
+        from: () => ({ where: () => ({ orderBy: () => Promise.resolve(rows) }) }),
+      });
+      mockDb.select
+        .mockReturnValueOnce(plain(items))
+        .mockReturnValueOnce(ordered(changes))
+        .mockReturnValueOnce(ordered(txns));
+    }
+
+    it('derives the return status of each returned device', async () => {
+      mockQueries(
+        [returned(1, 'A'), returned(2, 'B'), returned(3, 'C'), returned(4, 'D'), returned(5, 'E'), returned(6, 'F')],
+        [
+          change(1, 'A', enrolled, null),
+          change(2, 'B', enrolled, t1),
+          change(3, 'C', enrolled, t1),
+          change(4, 'D', enrolled, t1),
+          change(5, 'E', { isDep: true, depStatus: 'pending' }, t1),
+        ],
+        [
+          { status: 'complete', createdAt: t1, requestPayload: '{"deviceId":"B"}' },
+          { status: 'error', createdAt: t1, requestPayload: '{"deviceId":"C"}' },
+          { status: 'in_progress', createdAt: t1, requestPayload: '{"deviceId":"D"}' },
+        ],
+      );
+
+      const result = await service.findReturnedItems(mockDb, 1);
+
+      expect(result.map((r) => r.returnStatus)).toEqual([
+        'pending', 'complete', 'error', 'submitted', 'removed', 'removed',
+      ]);
+    });
+
+    it('returns nothing without querying changes when no items were returned', async () => {
+      mockQueries([], [], []);
+      expect(await service.findReturnedItems(mockDb, 1)).toEqual([]);
+      expect(mockDb.select).toHaveBeenCalledTimes(1);
     });
   });
 

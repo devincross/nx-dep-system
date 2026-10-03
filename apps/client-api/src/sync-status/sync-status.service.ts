@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { TenantDb, syncStatus, orders, accounts, orderItems } from '@org/database';
 
 export interface SyncStatusResult {
@@ -121,7 +121,7 @@ export class SyncStatusService {
    */
   async getSyncHistory(
     db: TenantDb,
-    limit: number = 10
+    limit = 10
   ): Promise<SyncStatusResult[]> {
     try {
       const results = await db

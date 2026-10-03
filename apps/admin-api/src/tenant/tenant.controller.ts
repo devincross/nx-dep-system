@@ -12,7 +12,6 @@ import {
 } from '@nestjs/common';
 import { TenantService } from './tenant.service.js';
 import { CreateTenantDto, UpdateTenantDto } from './dto/index.js';
-import { DomainService } from '../domain/domain.service.js';
 import { migrateLandlordDb, migrateTenantDb, getLandlordDb, tenants, domains, getTenantConnection, orderItems, orders } from '@org/database';
 import { sql, like, eq, and, isNull, isNotNull, notLike } from 'drizzle-orm';
 
@@ -22,7 +21,6 @@ export class TenantController {
 
   constructor(
     private readonly tenantService: TenantService,
-    private readonly domainService: DomainService,
   ) {}
 
   @Get()

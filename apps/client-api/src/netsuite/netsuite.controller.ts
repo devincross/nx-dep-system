@@ -7,12 +7,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { NetsuiteService } from './netsuite.service.js';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
+import { Roles } from '../auth/decorators/index.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 
 @Controller('netsuite')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class NetsuiteController {
   constructor(private readonly netsuiteService: NetsuiteService) {}
 

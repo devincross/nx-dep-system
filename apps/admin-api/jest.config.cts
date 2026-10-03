@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 const { readFileSync } = require('fs')
 
 // Reading the SWC compilation config for the spec files
@@ -13,6 +13,7 @@ module.exports = {
   displayName: '@org/admin-api',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
+  setupFiles: ['reflect-metadata'],
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig]
   },

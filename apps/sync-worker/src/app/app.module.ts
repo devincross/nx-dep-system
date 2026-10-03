@@ -8,7 +8,6 @@ import { PushChangesService } from './push-changes.service.js';
 
 // Application layer
 import { SyncAccountsUseCase, SyncOrdersUseCase, PushChangesUseCase } from '../application/index.js';
-import { DepEnrollUseCase } from '../application/dep-enroll.use-case.js';
 import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
 
 // Infrastructure layer
@@ -42,7 +41,6 @@ import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
     SyncAccountsUseCase,
     SyncOrdersUseCase,
     PushChangesUseCase,
-    DepEnrollUseCase,
     DepPushChangesUseCase,
     // Adapters
     MapperRegistry,

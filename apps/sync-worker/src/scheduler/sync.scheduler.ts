@@ -2,11 +2,11 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
-  landlordDb,
+  getLandlordDb,
   tenants,
-  tenantDomains,
+  domains,
   credentials,
   TenantDb,
 } from '@org/database';
@@ -20,6 +20,7 @@ import { AccountRepository } from '../infrastructure/repositories/account.reposi
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { SyncStatusRepository } from '../infrastructure/repositories/sync-status.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
+import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 
 interface TenantMetadata {
   connectionType?: 'netsuite' | 'zoho';
@@ -35,10 +36,6 @@ export class SyncScheduler implements OnModuleInit {
     private readonly mapperRegistry: MapperRegistry,
     private readonly netsuiteAdapter: NetsuiteAdapter,
     private readonly zohoAdapter: ZohoAdapter,
-    private readonly accountRepository: AccountRepository,
-    private readonly orderRepository: OrderRepository,
-    private readonly syncStatusRepository: SyncStatusRepository,
-    private readonly orderChangeRepository: OrderChangeRepository,
   ) {}
 
   onModuleInit() {
@@ -71,12 +68,27 @@ export class SyncScheduler implements OnModuleInit {
   }
 
   /**
-   * Get all tenants with sync enabled from landlord database
+   * Get all tenants with sync enabled from the landlord database, joined
+   * with their domain rows for the tenant DB connection info — the same
+   * source of truth the DEP push/poll schedulers use. (Previously this
+   * guessed the DB name from a `tenant_<slug>` naming convention, which
+   * can silently connect to the wrong/unmigrated database.)
    */
   private async getSyncEnabledTenants() {
-    const results = await landlordDb
-      .select()
+    const rows = await getLandlordDb()
+      .select({
+        tenantId: tenants.id,
+        slug: tenants.slug,
+        metadata: tenants.metadata,
+        dbHost: domains.dbHost,
+        dbPort: domains.dbPort,
+        dbName: domains.dbName,
+        dbUser: domains.dbUser,
+        dbPassword: domains.dbPassword,
+        isPrimary: domains.isPrimary,
+      })
       .from(tenants)
+      .innerJoin(domains, eq(tenants.id, domains.tenantId))
       .where(
         and(
           eq(tenants.isActive, true),
@@ -84,13 +96,29 @@ export class SyncScheduler implements OnModuleInit {
         )
       );
 
-    return results;
+    // Dedupe by tenant (pick primary domain)
+    const byTenant = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      if (!byTenant.has(row.tenantId) || row.isPrimary) {
+        byTenant.set(row.tenantId, row);
+      }
+    }
+
+    return [...byTenant.values()];
   }
 
   /**
    * Sync a single tenant
    */
-  private async syncTenant(tenant: typeof tenants.$inferSelect) {
+  private async syncTenant(tenant: {
+    slug: string;
+    metadata: string | null;
+    dbHost: string;
+    dbPort: number;
+    dbName: string;
+    dbUser: string;
+    dbPassword: string;
+  }) {
     this.logger.log(`Syncing tenant: ${tenant.slug}`);
 
     // Parse tenant metadata for connection type
@@ -99,12 +127,16 @@ export class SyncScheduler implements OnModuleInit {
       : {};
     const connectionType = metadata.connectionType || 'netsuite';
 
-    // Connect to tenant database
-    const tenantDb = await this.connectToTenantDb(tenant.slug);
-    if (!tenantDb) {
-      this.logger.error(`Failed to connect to tenant database: ${tenant.slug}`);
-      return;
-    }
+    // Connect to tenant database using the connection info from the
+    // domains table
+    const connection = await mysql.createConnection({
+      host: tenant.dbHost,
+      port: tenant.dbPort,
+      user: tenant.dbUser,
+      password: tenant.dbPassword,
+      database: tenant.dbName,
+    });
+    const tenantDb = drizzle(connection) as unknown as TenantDb;
 
     try {
       // Get credentials for the connection type
@@ -125,27 +157,45 @@ export class SyncScheduler implements OnModuleInit {
         return;
       }
 
-      // Set database connection on repositories
-      this.accountRepository.setDb(tenantDb);
-      this.orderRepository.setDb(tenantDb);
-      this.syncStatusRepository.setDb(tenantDb);
-      this.orderChangeRepository.setDb(tenantDb);
+      // Fresh repository instances per run: the repositories are NOT the
+      // NestJS singletons because the DEP push/poll schedulers run
+      // concurrently and would re-point a shared repository at their own
+      // (soon-closed) connection mid-sync.
+      const accountRepository = new AccountRepository();
+      const orderRepository = new OrderRepository();
+      const syncStatusRepository = new SyncStatusRepository();
+      const orderChangeRepository = new OrderChangeRepository();
+      accountRepository.setDb(tenantDb);
+      orderRepository.setDb(tenantDb);
+      syncStatusRepository.setDb(tenantDb);
+      orderChangeRepository.setDb(tenantDb);
 
       // Wire up change tracking
-      this.orderRepository.setChangeRepository(this.orderChangeRepository);
+      orderRepository.setChangeRepository(orderChangeRepository);
 
-      // Get last sync time for incremental sync
-      const lastAccountSync = await this.syncStatusRepository.getLatest('accounts');
-      const lastOrderSync = await this.syncStatusRepository.getLatest('orders');
+      // Get last successful sync time for incremental sync
+      const lastAccountSyncAt = await syncStatusRepository.getLastSuccessAt('accounts');
+      const lastOrderSyncAt = await syncStatusRepository.getLastSuccessAt('orders');
+
+      // A full-history orders pull takes NetSuite longer than fetch's
+      // 5-minute headers timeout. Bound the first-ever window; anything
+      // older comes in via the historical import tool.
+      const initialOrdersWindow = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const ordersSince = lastOrderSyncAt ?? initialOrdersWindow;
+      if (!lastOrderSyncAt) {
+        this.logger.log(
+          `No successful orders sync yet for ${tenant.slug} — starting from ${ordersSince.toISOString().split('T')[0]}`,
+        );
+      }
 
       // Sync accounts
       this.logger.log(`Syncing accounts for tenant ${tenant.slug}...`);
       await this.syncAccountsUseCase.execute(
         adapter,
         mapper,
-        this.accountRepository,
-        this.syncStatusRepository,
-        { lastModified: lastAccountSync?.lastSuccessAt }
+        accountRepository,
+        syncStatusRepository,
+        { lastModified: lastAccountSyncAt ?? undefined }
       );
 
       // Sync orders
@@ -153,33 +203,15 @@ export class SyncScheduler implements OnModuleInit {
       await this.syncOrdersUseCase.execute(
         adapter,
         mapper,
-        this.accountRepository,
-        this.orderRepository,
-        this.syncStatusRepository,
-        { lastModified: lastOrderSync?.lastSuccessAt }
+        accountRepository,
+        orderRepository,
+        syncStatusRepository,
+        { lastModified: ordersSince }
       );
 
       this.logger.log(`Tenant ${tenant.slug} sync complete`);
     } finally {
-      // Close tenant database connection
-      // Note: In production, you might want to pool these connections
-    }
-  }
-
-  private async connectToTenantDb(slug: string): Promise<TenantDb | null> {
-    try {
-      const dbName = `tenant_${slug.replace(/-/g, '_')}`;
-      const connection = await mysql.createConnection({
-        host: process.env['DB_HOST'] || 'localhost',
-        port: parseInt(process.env['DB_PORT'] || '3306'),
-        user: process.env['DB_USER'] || 'root',
-        password: process.env['DB_PASSWORD'] || '',
-        database: dbName,
-      });
-      return drizzle(connection) as TenantDb;
-    } catch (error) {
-      this.logger.error(`Failed to connect to tenant DB: ${error}`);
-      return null;
+      await connection.end();
     }
   }
 
@@ -192,10 +224,9 @@ export class SyncScheduler implements OnModuleInit {
 
     if (results.length === 0) return null;
 
-    // Note: connectionData needs decryption in real implementation
     return {
       ...results[0],
-      connectionData: JSON.parse(results[0].connectionData) as Record<string, unknown>,
+      connectionData: parseConnectionData(results[0].connectionData),
     };
   }
 

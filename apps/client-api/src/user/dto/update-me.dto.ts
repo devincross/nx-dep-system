@@ -2,19 +2,24 @@ import {
   IsString,
   IsEmail,
   IsOptional,
-  MaxLength,
   MinLength,
+  MaxLength,
 } from 'class-validator';
 
-export class RegisterDto {
+/**
+ * Self-service profile update — deliberately excludes role and isActive.
+ */
+export class UpdateMeDto {
+  @IsOptional()
   @IsEmail()
   @MaxLength(255)
-  email!: string;
+  email?: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(8)
   @MaxLength(255)
-  password!: string;
+  password?: string;
 
   @IsOptional()
   @IsString()
@@ -26,4 +31,3 @@ export class RegisterDto {
   @MaxLength(255)
   lastName?: string;
 }
-

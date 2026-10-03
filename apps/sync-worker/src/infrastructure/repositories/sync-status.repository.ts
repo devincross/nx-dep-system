@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { Injectable } from "@nestjs/common";
+import { eq, desc, sql } from 'drizzle-orm';
 import { TenantDb, syncStatus } from '@org/database';
 import {
   SyncStatusRepositoryPort,
@@ -8,7 +8,6 @@ import {
 
 @Injectable()
 export class SyncStatusRepository implements SyncStatusRepositoryPort {
-  private readonly logger = new Logger(SyncStatusRepository.name);
   private db: TenantDb | null = null;
 
   setDb(db: TenantDb): void {
@@ -37,6 +36,24 @@ export class SyncStatusRepository implements SyncStatusRepositoryPort {
     }
 
     return this.toEntity(results[0]);
+  }
+
+  /**
+   * Watermark for incremental sync: the most recent successful run's
+   * lastSuccessAt. getLatest() is unsuitable for this — it returns the
+   * newest row regardless of outcome, so a single failed run (which has
+   * lastSuccessAt = null) would reset the watermark and force a
+   * full-history pull.
+   */
+  async getLastSuccessAt(syncType: 'accounts' | 'orders' | 'full'): Promise<Date | null> {
+    const db = this.ensureDb();
+
+    const [row] = await db
+      .select({ last: sql<Date | null>`MAX(${syncStatus.lastSuccessAt})` })
+      .from(syncStatus)
+      .where(eq(syncStatus.syncType, syncType));
+
+    return row?.last ? new Date(row.last) : null;
   }
 
   async create(status: Omit<SyncStatusEntity, 'id'>): Promise<SyncStatusEntity> {
@@ -118,6 +135,11 @@ export class SyncStatusRepository implements SyncStatusRepositoryPort {
     const now = new Date();
     const hasErrors = results.recordsErrored > 0 || !!results.errorMessage;
 
+    // error_message/error_details are TEXT columns (64KB) — a run with
+    // thousands of per-record errors would make this update itself fail
+    const truncate = (value: string | undefined, max: number) =>
+      value && value.length > max ? `${value.slice(0, max)}… [truncated]` : value;
+
     return this.update(id, {
       status: hasErrors ? 'error' : 'success',
       lastSuccessAt: hasErrors ? undefined : now,
@@ -125,8 +147,8 @@ export class SyncStatusRepository implements SyncStatusRepositoryPort {
       recordsCreated: results.recordsCreated,
       recordsUpdated: results.recordsUpdated,
       recordsErrored: results.recordsErrored,
-      errorMessage: results.errorMessage,
-      errorDetails: results.errorDetails,
+      errorMessage: truncate(results.errorMessage, 2000),
+      errorDetails: truncate(results.errorDetails, 50000),
       completedAt: now,
     });
   }

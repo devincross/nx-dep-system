@@ -6,7 +6,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
+import { Roles } from '../auth/decorators/index.js';
 import { ZohoOAuthService } from './zoho-oauth.service.js';
 
 class AuthUrlQueryDto {
@@ -33,7 +34,8 @@ class ExchangeGrantTokenDto {
 }
 
 @Controller('zoho')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class ZohoController {
   constructor(private readonly zohoOAuthService: ZohoOAuthService) {}
 

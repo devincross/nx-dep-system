@@ -59,7 +59,7 @@ export class CertificateParserService {
   /**
    * Check if a certificate will expire within the given number of days
    */
-  willExpireSoon(pemCertificate: string, days: number = 30): boolean {
+  willExpireSoon(pemCertificate: string, days = 30): boolean {
     const expirationDate = this.getExpirationDate(pemCertificate);
     if (!expirationDate) return true;
     

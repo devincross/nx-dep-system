@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import type { SafeUser } from './auth.service.js';
-import { LoginDto, RegisterDto } from './dto/index.js';
+import { LoginDto } from './dto/index.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -37,27 +37,6 @@ export class AuthController {
     await this.authService.updateLastLogin(ctx.db, result.user.id);
 
     return result;
-  }
-
-  /**
-   * Register endpoint - creates a new user and returns JWT token
-   */
-  @Public()
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  async register(
-    @CurrentTenant() ctx: TenantContext,
-    @Body() registerDto: RegisterDto
-  ): Promise<{ access_token: string; user: SafeUser }> {
-    const user = await this.authService.register(ctx.db, registerDto);
-
-    // Generate token for the new user
-    const payload = { sub: user.id, email: user.email, tenantId: ctx.tenant.id };
-
-    return {
-      access_token: this.authService['jwtService'].sign(payload),
-      user,
-    };
   }
 
   /**

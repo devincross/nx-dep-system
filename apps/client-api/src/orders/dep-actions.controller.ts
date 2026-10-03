@@ -6,34 +6,42 @@ import {
   Param,
   ParseIntPipe,
   UseGuards,
-  Logger,
-  BadRequestException,
 } from '@nestjs/common';
+import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { DepActionsService } from './dep-actions.service.js';
 
+// Note: the global ValidationPipe runs with whitelist + forbidNonWhitelisted,
+// so every property needs a validator decorator or requests carrying it 400.
+
 class DepEnrollDto {
   /** Override the customer ID (Apple org ID). Uses depAccountId from account if not provided */
+  @IsOptional()
+  @IsString()
   customerId?: string;
 }
 
 class DepReturnDto {
   /** Serial numbers to return. If empty, returns all devices on the order */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   serialNumbers?: string[];
 }
 
 class DepReconcileDto {
   /** Order IDs to reconcile. If empty, reconciles all orders on the current page */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
   orderIds?: number[];
 }
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
 export class DepActionsController {
-  private readonly logger = new Logger(DepActionsController.name);
-
   constructor(private readonly depActionsService: DepActionsService) {}
 
   /**
@@ -58,6 +66,17 @@ export class DepActionsController {
     @Body() body: DepReturnDto,
   ) {
     return this.depActionsService.returnDevices(tenant.db, id, body.serialNumbers);
+  }
+
+  /**
+   * Push the order's current state to the tenant's ERP (NetSuite or Zoho)
+   */
+  @Post(':id/erp/push-status')
+  async pushStatusToErp(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.depActionsService.pushOrderStateToErp(tenant, id);
   }
 
   /**
@@ -116,6 +135,19 @@ export class DepActionsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.depActionsService.checkAndUpdateDepStatus(tenant.db, id);
+  }
+
+  /**
+   * Check the status of a specific DEP transaction by its db id.
+   * Calls Apple's check-transaction-status with deviceEnrollmentTransactionId —
+   * the only way to see per-device errors after an async ingest.
+   */
+  @Post('dep/transactions/:txnId/check-status')
+  async checkTransactionStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('txnId', ParseIntPipe) txnId: number,
+  ) {
+    return this.depActionsService.checkTransactionStatus(tenant.db, txnId);
   }
 
   /**

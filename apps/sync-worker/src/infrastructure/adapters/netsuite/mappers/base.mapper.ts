@@ -22,9 +22,11 @@ export class NetsuiteBaseMapper implements MapperPort {
     return {
       externalAccountId: String(raw['id'] ?? raw['internalid'] ?? ''),
       name: String(raw['companyname'] ?? raw['name'] ?? raw['entityid'] ?? ''),
-      depAccountId: raw['custentity_dep_account_id'] 
-        ? String(raw['custentity_dep_account_id']) 
-        : undefined,
+      depAccountId: raw['dep_id']
+        ? String(raw['dep_id'])
+        : raw['custentity_dep_account_id']
+          ? String(raw['custentity_dep_account_id'])
+          : undefined,
     };
   }
 
@@ -38,10 +40,10 @@ export class NetsuiteBaseMapper implements MapperPort {
     return {
       externalOrderId: String(raw['id'] ?? raw['internalid'] ?? raw['tranid'] ?? ''),
       externalAccountId: String(
-        raw['entity']?.['id'] ?? 
-        raw['entity'] ?? 
-        raw['customer']?.['id'] ?? 
-        raw['customer'] ?? 
+        (raw['entity'] as { id?: unknown })?.id ??
+        raw['entity'] ??
+        (raw['customer'] as { id?: unknown })?.id ??
+        raw['customer'] ??
         ''
       ),
       externalOrderStatus: raw['status'] ? String(raw['status']) : undefined,

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import api from '../services/api';
-import type { User, LoginDto, RegisterDto, LoginResponse } from '../types';
+import type { User, LoginDto, LoginResponse } from '../types';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
@@ -14,6 +14,7 @@ export const useAuthStore = defineStore('auth', () => {
   if (storedUser) user.value = JSON.parse(storedUser);
 
   const isAuthenticated = computed(() => !!token.value);
+  const isAdmin = computed(() => user.value?.role === 'admin');
 
   async function login(credentials: LoginDto): Promise<void> {
     const response = await api.post<LoginResponse>('/auth/login', credentials);
@@ -21,15 +22,6 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = response.data.user;
     localStorage.setItem('token', response.data.access_token);
     localStorage.setItem('user', JSON.stringify(response.data.user));
-  }
-
-  async function register(userData: RegisterDto): Promise<LoginResponse> {
-    const response = await api.post<LoginResponse>('/auth/register', userData);
-    token.value = response.data.access_token;
-    user.value = response.data.user;
-    localStorage.setItem('token', response.data.access_token);
-    localStorage.setItem('user', JSON.stringify(response.data.user));
-    return response.data;
   }
 
   async function getProfile(): Promise<User> {
@@ -51,14 +43,20 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('user');
   }
 
+  function setUser(updated: User): void {
+    user.value = updated;
+    localStorage.setItem('user', JSON.stringify(updated));
+  }
+
   return {
     user,
     token,
     isAuthenticated,
+    isAdmin,
     login,
-    register,
     getProfile,
     validateToken,
+    setUser,
     logout,
   };
 });

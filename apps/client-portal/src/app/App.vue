@@ -10,12 +10,21 @@ const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const user = computed(() => authStore.user);
 
-const menuItems = [
-  { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
-  { title: 'Orders', icon: 'mdi-package-variant-closed', to: '/orders' },
-  { title: 'Credentials', icon: 'mdi-key-variant', to: '/credentials' },
-  { title: 'NetSuite', icon: 'mdi-cloud-sync', to: '/netsuite' },
-];
+const menuItems = computed(() => {
+  const items = [
+    { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
+    { title: 'Orders', icon: 'mdi-package-variant-closed', to: '/orders' },
+    { title: 'Accounts', icon: 'mdi-account-multiple', to: '/accounts' },
+  ];
+  if (authStore.isAdmin) {
+    items.push(
+      { title: 'Credentials', icon: 'mdi-key-variant', to: '/credentials' },
+      { title: 'NetSuite', icon: 'mdi-cloud-sync', to: '/netsuite' },
+      { title: 'Users', icon: 'mdi-account-cog', to: '/users' },
+    );
+  }
+  return items;
+});
 
 function logout() {
   authStore.logout();
@@ -39,10 +48,16 @@ function logout() {
           </template>
           <v-list>
             <v-list-item>
-              <v-list-item-title>{{ user?.name }}</v-list-item-title>
+              <v-list-item-title>{{ [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email }}</v-list-item-title>
               <v-list-item-subtitle>{{ user?.email }}</v-list-item-subtitle>
             </v-list-item>
             <v-divider></v-divider>
+            <v-list-item to="/profile">
+              <template v-slot:prepend>
+                <v-icon>mdi-account-edit</v-icon>
+              </template>
+              <v-list-item-title>My Account</v-list-item-title>
+            </v-list-item>
             <v-list-item @click="logout">
               <template v-slot:prepend>
                 <v-icon>mdi-logout</v-icon>

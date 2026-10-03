@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useOrdersStore } from '../../stores/orders';
 import api from '../../services/api';
-import type { Order, OrderItem, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
+import type { Order, OrderItem, ReturnedOrderItem, ReturnStatus, OrderStatus, OrderItemDepStatus, CreateOrderItemDto } from '../../types';
 
 const route = useRoute();
 const router = useRouter();
@@ -34,6 +34,11 @@ const depTransactionsLoading = ref(false);
 const checkStatusLoading = ref(false);
 const checkStatusResult = ref<any>(null);
 const expandedTransactions = ref<number[]>([]);
+const checkingTxnId = ref<number | null>(null);
+const erpPushLoading = ref(false);
+const erpPushResult = ref<{ erp: string; externalOrderId: string; depStatus: string; depResponse: string } | null>(null);
+const txnCheckResults = ref<Record<number, { status: string; errorCode?: string | null; errorMessage?: string | null }>>({});
+const txnCheckErrors = ref<Record<number, string>>({});
 
 const depStatuses: OrderItemDepStatus[] = ['pending', 'submitted', 'complete', 'error', 'changes'];
 
@@ -66,7 +71,8 @@ const appleDeviceMap = computed(() => {
 // Serials in Apple but not in our system
 const serialsOnlyInApple = computed(() => {
   if (!order.value?.items) return [];
-  const ourSerials = new Set(order.value.items.map((i) => i.serialNumber));
+  // Returned devices are still ours — Apple lists them until the return processes
+  const ourSerials = new Set(tableItems.value.map((i) => i.serialNumber));
   return [...appleDeviceMap.value.keys()].filter((s) => !ourSerials.has(s));
 });
 
@@ -84,6 +90,27 @@ function getStatusColor(status: OrderStatus | OrderItemDepStatus): string {
   };
   return colors[status] || 'grey';
 }
+
+const returnStatusLabels: Record<ReturnStatus, string> = {
+  removed: 'Removed',
+  pending: 'Return queued',
+  submitted: 'Return submitted',
+  complete: 'Return complete',
+  error: 'Return error',
+};
+
+function getReturnStatusColor(status: ReturnStatus): string {
+  const colors: Record<ReturnStatus, string> = {
+    removed: 'grey', pending: 'orange', submitted: 'blue', complete: 'success', error: 'error',
+  };
+  return colors[status];
+}
+
+// Active items followed by returned ones, so returns stay visible with their DEP status
+const tableItems = computed<(OrderItem | ReturnedOrderItem)[]>(() => [
+  ...(order.value?.items ?? []),
+  ...(order.value?.returnedItems ?? []),
+]);
 
 function getOrderTypeLabel(type: string): string {
   const labels: Record<string, string> = { OR: 'Enroll', RE: 'Return', VD: 'Void', OV: 'Override', SC: 'Status Check' };
@@ -188,6 +215,19 @@ async function handleRestoreItem(item: OrderItem) {
   }
 }
 
+async function pushToErp() {
+  erpPushLoading.value = true;
+  erpPushResult.value = null;
+  try {
+    const response = await api.post(`/orders/${orderId.value}/erp/push-status`);
+    erpPushResult.value = response.data;
+  } catch (err: any) {
+    error.value = err.response?.data?.message || 'Unable to push the order status to the ERP.';
+  } finally {
+    erpPushLoading.value = false;
+  }
+}
+
 async function checkAndUpdateStatus() {
   checkStatusLoading.value = true;
   checkStatusResult.value = null;
@@ -201,6 +241,24 @@ async function checkAndUpdateStatus() {
     error.value = err.response?.data?.message || 'Unable to check DEP status.';
   } finally {
     checkStatusLoading.value = false;
+  }
+}
+
+async function checkTransactionStatus(txnId: number) {
+  checkingTxnId.value = txnId;
+  delete txnCheckErrors.value[txnId];
+  try {
+    const response = await api.post(`/orders/dep/transactions/${txnId}/check-status`);
+    txnCheckResults.value[txnId] = {
+      status: response.data.status,
+      errorCode: response.data.errorCode,
+      errorMessage: response.data.errorMessage,
+    };
+    await loadDepTransactions();
+  } catch (err: any) {
+    txnCheckErrors.value[txnId] = err.response?.data?.message || 'Unable to check transaction status.';
+  } finally {
+    checkingTxnId.value = null;
   }
 }
 
@@ -229,10 +287,14 @@ onMounted(() => {
       <h1 class="text-h4">Order Details</h1>
       <div>
         <v-btn variant="text" @click="router.push('/orders')">Back to Orders</v-btn>
+        <v-btn variant="outlined" color="secondary" class="ml-2" :loading="erpPushLoading" prepend-icon="mdi-database-export" @click="pushToErp">Push to ERP</v-btn>
         <v-btn color="primary" :to="`/orders/${orderId}/edit`" class="ml-2">Edit Order</v-btn>
       </div>
     </div>
     <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">{{ error }}</v-alert>
+    <v-alert v-if="erpPushResult" type="success" class="mb-4" closable @click:close="erpPushResult = null">
+      Pushed status '{{ erpPushResult.depStatus }}' to {{ erpPushResult.erp === 'zoho' ? 'Zoho' : 'NetSuite' }} for order {{ erpPushResult.externalOrderId }} ({{ erpPushResult.depResponse }}).
+    </v-alert>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4"></v-progress-linear>
 
     <template v-if="order && !loading">
@@ -338,11 +400,11 @@ onMounted(() => {
         <v-col cols="12">
           <v-card>
             <v-card-title class="d-flex justify-space-between align-center">
-              Order Items ({{ order.items?.length || 0 }})
+              Order Items ({{ order.items?.length || 0 }}<template v-if="order.returnedItems?.length">, {{ order.returnedItems.length }} returned</template>)
               <v-btn color="primary" size="small" @click="addItemDialog = true" prepend-icon="mdi-plus">Add Item</v-btn>
             </v-card-title>
             <v-card-text>
-              <v-data-table :headers="itemHeaders" :items="order.items || []" :loading="itemLoading" density="compact">
+              <v-data-table :headers="itemHeaders" :items="tableItems" :loading="itemLoading" density="compact">
                 <template v-slot:item.serialNumber="{ item }">
                   <span
                     :class="{
@@ -357,7 +419,13 @@ onMounted(() => {
                     >mdi-alert</v-icon>
                   </span>
                 </template>
-                <template v-slot:item.depStatus="{ item }"><v-chip :color="getStatusColor(item.depStatus)" size="small">{{ item.depStatus }}</v-chip></template>
+                <template v-slot:item.depStatus="{ item }">
+                  <template v-if="item.deletedAt">
+                    <v-chip color="grey" size="small" class="mr-1">Returned</v-chip>
+                    <v-chip v-if="'returnStatus' in item" :color="getReturnStatusColor(item.returnStatus)" size="small">{{ returnStatusLabels[item.returnStatus] }}</v-chip>
+                  </template>
+                  <v-chip v-else :color="getStatusColor(item.depStatus)" size="small">{{ item.depStatus }}</v-chip>
+                </template>
                 <template v-slot:item.isDep="{ item }"><v-icon :color="item.isDep ? 'success' : 'grey'">{{ item.isDep ? 'mdi-check' : 'mdi-close' }}</v-icon></template>
                 <template v-slot:item.appleStatus="{ item }">
                   <template v-if="depDetailsLoading">
@@ -410,6 +478,35 @@ onMounted(() => {
                   <!-- Expanded payload -->
                   <v-expand-transition>
                     <div v-if="expandedTransactions.includes(txn.id)" class="pa-4" style="background: #fafafa; border-top: 1px solid #e0e0e0;">
+                      <div v-if="txn.deviceEnrollmentTransactionId" class="d-flex align-center mb-3">
+                        <span class="text-caption mr-3">
+                          <strong>Apple txn:</strong> {{ txn.deviceEnrollmentTransactionId }}
+                        </span>
+                        <v-btn
+                          size="x-small"
+                          color="secondary"
+                          :loading="checkingTxnId === txn.id"
+                          @click.stop="checkTransactionStatus(txn.id)"
+                          prepend-icon="mdi-magnify"
+                        >Check Result</v-btn>
+                      </div>
+                      <v-alert
+                        v-if="txnCheckResults[txn.id]"
+                        :type="txnCheckResults[txn.id].status === 'complete' ? 'success' : (txnCheckResults[txn.id].status === 'error' ? 'error' : 'info')"
+                        variant="tonal" density="compact" class="mb-3" closable
+                        @click:close="delete txnCheckResults[txn.id]"
+                      >
+                        <div><strong>Status:</strong> {{ txnCheckResults[txn.id].status }}</div>
+                        <div v-if="txnCheckResults[txn.id].errorCode"><strong>{{ txnCheckResults[txn.id].errorCode }}:</strong> {{ txnCheckResults[txn.id].errorMessage }}</div>
+                        <div v-else-if="txnCheckResults[txn.id].errorMessage">{{ txnCheckResults[txn.id].errorMessage }}</div>
+                      </v-alert>
+                      <v-alert
+                        v-if="txnCheckErrors[txn.id]"
+                        type="warning" variant="tonal" density="compact" class="mb-3" closable
+                        @click:close="delete txnCheckErrors[txn.id]"
+                      >
+                        {{ txnCheckErrors[txn.id] }}
+                      </v-alert>
                       <v-row>
                         <v-col cols="12" md="6">
                           <div class="text-subtitle-2 mb-1">Request Payload</div>

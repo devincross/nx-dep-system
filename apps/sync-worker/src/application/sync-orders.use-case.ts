@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { describeError } from './sync-accounts.use-case.js';
 import { DataSourcePort, MapperPort, FetchOptions } from '../domain/ports/data-source.port.js';
 import {
   AccountRepositoryPort,
@@ -47,9 +48,24 @@ export class SyncOrdersUseCase {
       // Process each order
       for (const rawOrder of fetchResult.data) {
         try {
+          // Tenant-specific returns/cancellations (e.g. BYU emits them as
+          // transaction_type 'return') remove serials from the orders
+          // holding them instead of becoming orders themselves
+          const orderReturn = mapper.mapReturn?.(rawOrder);
+          if (orderReturn) {
+            const removed = await orderRepository.removeItemsBySerial(orderReturn.serialNumbers);
+            this.logger.log(
+              `Return ${orderReturn.externalOrderId}: removed ${removed.length}/${orderReturn.serialNumbers.length} serials` +
+              (removed.length ? ` from order(s) ${[...new Set(removed.map((r) => r.orderId))].join(', ')}` : ''),
+            );
+            result.processed++;
+            result.updated++;
+            continue;
+          }
+
           // Map raw data to domain entity
           const orderEntity = mapper.mapOrder(rawOrder);
-          
+
           if (!orderEntity.externalOrderId) {
             this.logger.warn('Skipping order with no external ID');
             continue;
@@ -69,7 +85,7 @@ export class SyncOrdersUseCase {
             });
             
             // Upsert the order with the new account
-            const { entity, created } = await orderRepository.upsert(orderEntity, newAccount.id);
+            const { created } = await orderRepository.upsert(orderEntity, newAccount.id);
             result.processed++;
             if (created) result.created++;
             else result.updated++;
@@ -89,9 +105,13 @@ export class SyncOrdersUseCase {
           }
         } catch (error) {
           result.errored++;
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          const errorMsg = describeError(error);
           result.errors.push(`Order sync error: ${errorMsg}`);
-          this.logger.error(`Error processing order: ${errorMsg}`);
+          // Log the first failure in full — the root cause is usually
+          // identical for every record, so don't spam the rest
+          if (result.errored === 1) {
+            this.logger.error(`Error processing order: ${errorMsg}`);
+          }
         }
       }
 
@@ -111,7 +131,7 @@ export class SyncOrdersUseCase {
       );
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = describeError(error);
       this.logger.error(`Orders sync failed: ${errorMsg}`);
       
       await syncStatusRepository.completeSync(syncStatus.id!, {

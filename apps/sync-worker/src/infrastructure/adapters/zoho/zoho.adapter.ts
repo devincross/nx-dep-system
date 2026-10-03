@@ -21,7 +21,7 @@ export class ZohoAdapter implements DataSourcePort {
   private readonly logger = new Logger(ZohoAdapter.name);
   private config: ZohoConfig | null = null;
   private accessToken: string | null = null;
-  private tokenExpiresAt: number = 0;
+  private tokenExpiresAt = 0;
 
   /**
    * Configure the adapter with Zoho credentials
@@ -173,7 +173,7 @@ export class ZohoAdapter implements DataSourcePort {
       throw new Error(`Zoho API error: ${response.status} - ${errorText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number } }>;
   }
 
   private async getAccessToken(): Promise<string> {

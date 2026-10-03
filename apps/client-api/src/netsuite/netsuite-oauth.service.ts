@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 
 export interface NetsuiteOAuthConfig {
@@ -109,14 +108,14 @@ export class NetsuiteOAuthService {
     // Sign the JWT with the private key
     const privateKey = this.normalizePrivateKey(config.privateKey);
 
-    this.logger.debug(`JWT header: kid=${config.certificateId}, alg=RS256`);
+    this.logger.debug(`JWT header: kid=${config.certificateId}, alg=PS256`);
     this.logger.debug(`JWT payload: iss=${config.clientId}, aud=${tokenUrl}, scope=${payload.scope}`);
     this.logger.debug(`Private key starts with: ${privateKey.substring(0, 40)}...`);
 
     const token = jwt.sign(payload, privateKey, {
-      algorithm: 'RS256',
+      algorithm: 'PS256',
       header: {
-        alg: 'RS256',
+        alg: 'PS256',
         typ: 'JWT',
         kid: config.certificateId,
       },
@@ -129,8 +128,11 @@ export class NetsuiteOAuthService {
    * Get the NetSuite OAuth token endpoint URL
    */
   private getTokenUrl(accountId: string): string {
-    // Convert account ID format: 4325477_SB1 -> 4325477-sb1
-    const normalizedAccount = accountId.toLowerCase().replace('_', '-');
+    // NetSuite host uses the domain form of the account ID: lowercase with
+    // hyphens (e.g. 4325477_SB1 -> 4325477-sb1). Normalize defensively so a
+    // stored account ID in either form resolves correctly; global replace
+    // covers IDs with more than one underscore.
+    const normalizedAccount = accountId.toLowerCase().replace(/_/g, '-');
     return `https://${normalizedAccount}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
   }
 

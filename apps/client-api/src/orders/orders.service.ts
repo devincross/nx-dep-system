@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, isNull, and, inArray } from 'drizzle-orm';
-import { TenantDb, orders, orderItems, Order, OrderItem } from '@org/database';
+import { eq, isNull, and, or, inArray, like, desc, sql, type SQL } from 'drizzle-orm';
+import { TenantDb, orders, orderItems, orderItemChanges, depTransactions, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
 /** Strip leading 'S' prefix from serial numbers (e.g. S12345 -> 12345) */
@@ -11,6 +11,55 @@ function normalizeSerial(sn: string): string {
 // Order with items
 export interface OrderWithItems extends Order {
   items: OrderItem[];
+}
+
+/**
+ * Where a returned (soft-deleted) device is in the Apple return process:
+ *  removed   – never enrolled at Apple, so there was nothing to return
+ *  pending   – return queued, not yet sent to Apple
+ *  submitted – return (RE) sent, awaiting Apple's result
+ *  complete  – Apple confirmed the return
+ *  error     – Apple rejected the return
+ */
+export type ReturnStatus = 'removed' | 'pending' | 'submitted' | 'complete' | 'error';
+
+export interface ReturnedOrderItem extends OrderItem {
+  returnStatus: ReturnStatus;
+  returnedAt: Date | null;
+}
+
+export interface OrdersPageOptions {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: OrderStatus;
+}
+
+export interface OrdersPage {
+  items: OrderWithItems[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+function deriveReturnStatus(
+  item: OrderItem,
+  change: { snapshot: string | null; syncedAt: Date | null } | undefined,
+  txn: { status: string } | undefined,
+): ReturnStatus {
+  if (item.depStatus === 'error') return 'error';
+  if (!change) return 'removed';
+  let enrolled = false;
+  try {
+    const snap = JSON.parse(change.snapshot ?? '{}');
+    enrolled = !!snap.isDep && (snap.depStatus === 'submitted' || snap.depStatus === 'complete');
+  } catch { /* treat as not enrolled */ }
+  if (!enrolled) return 'removed';
+  if (!change.syncedAt) return 'pending';
+  if (!txn) return 'submitted';
+  if (txn.status === 'complete') return 'complete';
+  if (txn.status === 'error' || txn.status === 'posted_with_errors') return 'error';
+  return 'submitted';
 }
 
 @Injectable()
@@ -44,22 +93,68 @@ export class OrdersService {
   }
 
   /**
-   * Find all orders (excluding soft-deleted items)
+   * Find a page of orders with optional search/status filter
+   * (soft-deleted items excluded)
    */
-  async findAll(db: TenantDb): Promise<OrderWithItems[]> {
-    const orderResults = await db.select().from(orders);
+  async findPage(db: TenantDb, opts: OrdersPageOptions): Promise<OrdersPage> {
+    const conditions: SQL[] = [];
+    if (opts.status) {
+      conditions.push(eq(orders.status, opts.status));
+    }
+    const search = opts.search?.trim();
+    if (search) {
+      const pattern = `%${search}%`;
+      // Serials are stored without the leading 'S' — normalize the search
+      // term the same way the import does so "S12345" finds "12345"
+      const serialPattern = `%${normalizeSerial(search)}%`;
+      conditions.push(
+        or(
+          like(orders.orderId, pattern),
+          like(orders.externalOrderId, pattern),
+          like(orders.depOrderId, pattern),
+          like(orders.po, pattern),
+          like(orders.source, pattern),
+          sql`EXISTS (SELECT 1 FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id} AND ${orderItems.deletedAt} IS NULL AND ${orderItems.serialNumber} LIKE ${serialPattern})`,
+        ) as SQL,
+      );
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const ordersWithItems: OrderWithItems[] = [];
-    for (const order of orderResults) {
-      const items = await db
-        .select()
-        .from(orderItems)
-        .where(and(eq(orderItems.orderId, order.id), isNull(orderItems.deletedAt)));
+    const [{ total }] = await db
+      .select({ total: sql<number>`COUNT(*)` })
+      .from(orders)
+      .where(where);
 
-      ordersWithItems.push({ ...order, items });
+    const pageRows = await db
+      .select()
+      .from(orders)
+      .where(where)
+      .orderBy(desc(orders.id))
+      .limit(opts.limit)
+      .offset((opts.page - 1) * opts.limit);
+
+    // Single query for the whole page's items instead of one per order
+    const orderIds = pageRows.map((o) => o.id);
+    const items = orderIds.length > 0
+      ? await db
+          .select()
+          .from(orderItems)
+          .where(and(inArray(orderItems.orderId, orderIds), isNull(orderItems.deletedAt)))
+      : [];
+
+    const itemsByOrder = new Map<number, OrderItem[]>();
+    for (const item of items) {
+      const list = itemsByOrder.get(item.orderId) ?? [];
+      list.push(item);
+      itemsByOrder.set(item.orderId, list);
     }
 
-    return ordersWithItems;
+    return {
+      items: pageRows.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] })),
+      total: Number(total),
+      page: opts.page,
+      limit: opts.limit,
+    };
   }
 
   /**
@@ -78,6 +173,46 @@ export class OrdersService {
       .where(and(eq(orderItems.orderId, id), isNull(orderItems.deletedAt)));
 
     return { ...result[0], items };
+  }
+
+  /**
+   * Soft-deleted (returned) items on an order, each with the status of its
+   * return at Apple derived from the 'removed' change and its RE/VD transaction
+   */
+  async findReturnedItems(db: TenantDb, orderId: number): Promise<ReturnedOrderItem[]> {
+    const items = await db
+      .select()
+      .from(orderItems)
+      .where(and(eq(orderItems.orderId, orderId), sql`${orderItems.deletedAt} IS NOT NULL`));
+    if (items.length === 0) return [];
+
+    const changes = await db
+      .select()
+      .from(orderItemChanges)
+      .where(and(eq(orderItemChanges.orderId, orderId), eq(orderItemChanges.changeType, 'removed')))
+      .orderBy(desc(orderItemChanges.id));
+    const txns = await db
+      .select()
+      .from(depTransactions)
+      .where(and(eq(depTransactions.orderId, orderId), inArray(depTransactions.orderType, ['RE', 'VD'])))
+      .orderBy(desc(depTransactions.id));
+
+    return items.map((item) => {
+      const change = changes.find((c) => c.orderItemId === item.id || c.serialNumber === item.serialNumber);
+      // Latest transaction created after the removal that mentions this serial
+      const txn = change
+        ? txns.find(
+            (t) =>
+              (!t.createdAt || !change.createdAt || t.createdAt >= change.createdAt) &&
+              (t.requestPayload ?? '').includes(item.serialNumber),
+          )
+        : undefined;
+      return {
+        ...item,
+        returnedAt: item.deletedAt,
+        returnStatus: deriveReturnStatus(item, change, txn),
+      };
+    });
   }
 
   /**
@@ -304,10 +439,28 @@ export class OrdersService {
       throw new NotFoundException(`Order item with ID "${itemId}" not found`);
     }
 
+    const item = itemResult[0];
+    const now = new Date();
+
     await db
       .update(orderItems)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: now })
       .where(eq(orderItems.id, itemId));
+
+    // Record the removal so the DEP push returns the device from Apple
+    await db.insert(orderItemChanges).values({
+      orderId,
+      orderItemId: item.id,
+      serialNumber: item.serialNumber,
+      changeType: 'removed',
+      snapshot: JSON.stringify({
+        id: item.id,
+        serialNumber: item.serialNumber,
+        isDep: item.isDep,
+        depStatus: item.depStatus,
+      }),
+      createdAt: now,
+    });
   }
 
   /**
@@ -326,15 +479,31 @@ export class OrdersService {
       throw new NotFoundException(`Order item with ID "${itemId}" not found`);
     }
 
+    const now = new Date();
     await db
       .update(orderItems)
-      .set({ deletedAt: null, updatedAt: new Date() })
+      .set({ deletedAt: null, updatedAt: now })
       .where(eq(orderItems.id, itemId));
 
     const restored = await db
       .select()
       .from(orderItems)
       .where(eq(orderItems.id, itemId));
+
+    // Record the restore as an addition so the DEP push re-enrolls it
+    // (removal recorded a 'removed' change and returned it from Apple)
+    await db.insert(orderItemChanges).values({
+      orderId,
+      orderItemId: restored[0].id,
+      serialNumber: restored[0].serialNumber,
+      changeType: 'added',
+      snapshot: JSON.stringify({
+        serialNumber: restored[0].serialNumber,
+        isDep: restored[0].isDep,
+        depStatus: restored[0].depStatus,
+      }),
+      createdAt: now,
+    });
 
     return restored[0];
   }

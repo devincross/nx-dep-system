@@ -60,6 +60,16 @@ export interface DataSourcePort {
 }
 
 /**
+ * A return/cancellation record from the external source: the listed
+ * serials should be removed from whatever orders currently hold them.
+ */
+export interface OrderReturnEntity {
+  /** External id of the return transaction itself (for logging) */
+  externalOrderId: string;
+  serialNumbers: string[];
+}
+
+/**
  * Mapper port interface
  * Each tenant can have a custom mapper implementation
  */
@@ -68,12 +78,21 @@ export interface MapperPort {
    * Map raw account data to domain entity
    */
   mapAccount(raw: RawAccountData): AccountEntity;
-  
+
   /**
    * Map raw order data to domain entity
    */
   mapOrder(raw: RawOrderData): OrderEntity;
-  
+
+  /**
+   * Optional: recognize a raw order record as a return/cancellation and
+   * map it. Return null for ordinary orders. How (and whether) returns
+   * appear in the order feed is tenant-specific — e.g. BYU's NetSuite
+   * feed emits them as transaction_type 'return' — so mappers that don't
+   * implement this never divert records from the normal order flow.
+   */
+  mapReturn?(raw: RawOrderData): OrderReturnEntity | null;
+
   /**
    * Get the mapper identifier
    */

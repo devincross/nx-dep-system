@@ -116,7 +116,7 @@ onMounted(() => {
             <v-list>
               <v-list-item>
                 <v-list-item-title>Name</v-list-item-title>
-                <v-list-item-subtitle>{{ authStore.user?.name }}</v-list-item-subtitle>
+                <v-list-item-subtitle>{{ [authStore.user?.firstName, authStore.user?.lastName].filter(Boolean).join(' ') }}</v-list-item-subtitle>
               </v-list-item>
               <v-list-item>
                 <v-list-item-title>Email</v-list-item-title>

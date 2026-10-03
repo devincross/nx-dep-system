@@ -9,7 +9,7 @@ COPY apps/client-api/package.json ./apps/client-api/
 COPY libs/database/package.json ./libs/database/
 
 # Install pnpm and dependencies
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+RUN npm install -g pnpm@9 && pnpm install --frozen-lockfile
 
 # Copy all source code needed for build
 COPY apps/client-api/ ./apps/client-api/

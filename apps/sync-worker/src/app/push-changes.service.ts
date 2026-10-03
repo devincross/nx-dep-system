@@ -1,12 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
-  landlordDb,
+  getLandlordDb,
   tenants,
-  tenantDomains,
-  credentials,
   TenantDb,
 } from '@org/database';
 import { PushChangesUseCase } from '../application/push-changes.use-case.js';
@@ -23,11 +21,6 @@ import {
 interface TenantRecord {
   id: string;
   slug: string;
-  dbHost: string;
-  dbPort: number;
-  dbName: string;
-  dbUser: string;
-  dbPassword: string;
 }
 
 @Injectable()
@@ -206,61 +199,44 @@ export class PushChangesService {
   }
 
   private async createTenantConnection(tenant: TenantRecord): Promise<TenantDb> {
+    const dbName = `tenant_${tenant.slug.replace(/-/g, '_')}`;
     const connection = await mysql.createConnection({
-      host: tenant.dbHost,
-      port: tenant.dbPort,
-      user: tenant.dbUser,
-      password: tenant.dbPassword,
-      database: tenant.dbName,
+      host: process.env['DB_HOST'] || 'localhost',
+      port: parseInt(process.env['DB_PORT'] || '3306'),
+      user: process.env['DB_USER'] || 'root',
+      password: process.env['DB_PASSWORD'] || '',
+      database: dbName,
     });
 
-    return drizzle(connection) as TenantDb;
+    return drizzle(connection) as unknown as TenantDb;
   }
 
   private async getSyncEnabledTenants(): Promise<TenantRecord[]> {
-    const results = await landlordDb
+    const results = await getLandlordDb()
       .select()
       .from(tenants)
       .where(
         and(
           eq(tenants.isActive, true),
-          eq(tenants.syncEnabled, true),
-          isNull(tenants.deletedAt)
+          eq(tenants.syncEnabled, true)
         )
       );
 
-    return results.map(t => ({
-      id: t.id,
-      slug: t.slug,
-      dbHost: t.dbHost,
-      dbPort: t.dbPort,
-      dbName: t.dbName,
-      dbUser: t.dbUser,
-      dbPassword: t.dbPassword,
-    }));
+    return results.map((t) => ({ id: t.id, slug: t.slug }));
   }
 
   private async getTenantBySlug(slug: string): Promise<TenantRecord[]> {
-    const results = await landlordDb
+    const results = await getLandlordDb()
       .select()
       .from(tenants)
       .where(
         and(
           eq(tenants.slug, slug),
-          eq(tenants.isActive, true),
-          isNull(tenants.deletedAt)
+          eq(tenants.isActive, true)
         )
       );
 
-    return results.map(t => ({
-      id: t.id,
-      slug: t.slug,
-      dbHost: t.dbHost,
-      dbPort: t.dbPort,
-      dbName: t.dbName,
-      dbUser: t.dbUser,
-      dbPassword: t.dbPassword,
-    }));
+    return results.map((t) => ({ id: t.id, slug: t.slug }));
   }
 }
 

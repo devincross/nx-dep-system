@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { generateKeyPairSync, createHash, X509Certificate, randomBytes } from 'crypto';
+import { generateKeyPairSync, X509Certificate } from 'crypto';
 import { execSync } from 'child_process';
 import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
 import { join } from 'path';
@@ -49,7 +49,7 @@ export class CertificateGeneratorService {
     this.logger.log(`Generating ${keySize}-bit RSA key pair and certificate (valid ${validityDays} days)`);
 
     // Generate RSA key pair using Node.js native crypto
-    const { privateKey: privateKeyPem, publicKey: publicKeyPem } = generateKeyPairSync('rsa', {
+    const { privateKey: privateKeyPem } = generateKeyPairSync('rsa', {
       modulusLength: keySize,
       publicKeyEncoding: { type: 'spki', format: 'pem' },
       privateKeyEncoding: { type: 'pkcs8', format: 'pem' },

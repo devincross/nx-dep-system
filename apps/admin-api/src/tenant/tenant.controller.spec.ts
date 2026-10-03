@@ -63,7 +63,7 @@ describe('TenantController', () => {
 
   describe('create', () => {
     it('should create a tenant', async () => {
-      const createDto = { name: 'Test Tenant', slug: 'test-tenant' };
+      const createDto = { name: 'Test Tenant', slug: 'test-tenant', subdomain: 'test' };
 
       const result = await controller.create(createDto);
 

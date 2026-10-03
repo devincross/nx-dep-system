@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import {
   DataSourcePort,
@@ -34,7 +35,7 @@ export class NetsuiteAdapter implements DataSourcePort {
   private readonly logger = new Logger(NetsuiteAdapter.name);
   private config: NetsuiteConfig | null = null;
   private accessToken: string | null = null;
-  private tokenExpiresAt: number = 0;
+  private tokenExpiresAt = 0;
 
   /**
    * Configure the adapter with NetSuite credentials
@@ -43,6 +44,30 @@ export class NetsuiteAdapter implements DataSourcePort {
     this.config = config;
     this.accessToken = null;
     this.tokenExpiresAt = 0;
+  }
+
+  /**
+   * Build a configured adapter from a credential's decrypted connection data.
+   */
+  static fromConnectionData(data: Record<string, unknown>): NetsuiteAdapter {
+    const adapter = new NetsuiteAdapter();
+    adapter.configure({
+      authType: (data['auth_type'] as 'oauth1' | 'oauth2') || 'oauth1',
+      restletHost: data['netsuite_restlet_host'] as string,
+      account: data['netsuite_account'] as string,
+      deployId: data['netsuite_deploy_id'] as number,
+      orderScriptId: data['netsuite_order_script_id'] as string,
+      accountScriptId: data['netsuite_account_script_id'] as string,
+      clientId: data['client_id'] as string,
+      certificateId: data['certificate_id'] as string,
+      privateKey: data['private_key'] as string,
+      consumerKey: data['netsuite_consumer_key'] as string,
+      consumerSecret: data['netsuite_consumer_secret'] as string,
+      token: data['netsuite_token'] as string,
+      tokenSecret: data['netsuite_token_secret'] as string,
+      realm: data['netsuite_realm'] as string,
+    });
+    return adapter;
   }
 
   async fetchAccounts(options?: FetchOptions): Promise<FetchResult<RawAccountData>> {
@@ -56,7 +81,8 @@ export class NetsuiteAdapter implements DataSourcePort {
 
     const response = await this.makeRequest('GET', this.config!.accountScriptId, params);
     
-    const data = Array.isArray(response) ? response : (response?.data ?? response?.results ?? []);
+    const wrapped = response as { data?: unknown[]; results?: unknown[] } | undefined;
+    const data = Array.isArray(response) ? response : (wrapped?.data ?? wrapped?.results ?? []);
     
     return {
       data: data as RawAccountData[],
@@ -76,13 +102,37 @@ export class NetsuiteAdapter implements DataSourcePort {
 
     const response = await this.makeRequest('GET', this.config!.orderScriptId, params);
     
-    const data = Array.isArray(response) ? response : (response?.data ?? response?.results ?? []);
+    const wrapped = response as { data?: unknown[]; results?: unknown[] } | undefined;
+    const data = Array.isArray(response) ? response : (wrapped?.data ?? wrapped?.results ?? []);
     
     return {
       data: data as RawOrderData[],
       hasMore: false,
       totalCount: data.length,
     };
+  }
+
+  /**
+   * Push a DEP outcome back to the NetSuite order via the order RESTlet.
+   * Contract (same as the legacy system): PUT { order_id, dep_response, dep_status }.
+   */
+  async updateOrderDepStatus(
+    externalOrderId: string,
+    depResponse: string,
+    depStatus: string,
+  ): Promise<void> {
+    this.ensureConfigured();
+
+    await this.makeRequest(
+      'PUT',
+      this.config!.orderScriptId,
+      { realm: this.config!.account },
+      {
+        order_id: externalOrderId,
+        dep_response: depResponse,
+        dep_status: depStatus,
+      },
+    );
   }
 
   async testConnection(): Promise<boolean> {
@@ -104,15 +154,16 @@ export class NetsuiteAdapter implements DataSourcePort {
   }
 
   private async makeRequest(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     scriptId: string,
-    params?: Record<string, string>
+    params?: Record<string, string>,
+    body?: unknown
   ): Promise<unknown> {
     this.ensureConfigured();
-    
+
     let url = `${this.config!.restletHost}?script=${scriptId}&deploy=${this.config!.deployId}`;
-    
-    if (params && method === 'GET') {
+
+    if (params) {
       const queryParams = new URLSearchParams(params);
       url += `&${queryParams.toString()}`;
     }
@@ -125,6 +176,7 @@ export class NetsuiteAdapter implements DataSourcePort {
     const response = await fetch(url, {
       method,
       headers,
+      body: method !== 'GET' && body !== undefined ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok) {
@@ -185,24 +237,90 @@ export class NetsuiteAdapter implements DataSourcePort {
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: this.config!.clientId,
-      sub: this.config!.clientId,
       aud: this.getTokenUrl(),
       iat: now,
       exp: now + 300,
-      scope: ['restlets', 'rest_webservices'],
+      scope: 'restlets',
     };
 
     return jwt.sign(payload, this.config!.privateKey!, {
-      algorithm: 'RS256',
-      header: { alg: 'RS256', typ: 'JWT', kid: this.config!.certificateId },
+      algorithm: 'PS256',
+      header: { alg: 'PS256', typ: 'JWT', kid: this.config!.certificateId },
     });
   }
 
+  /**
+   * OAuth 1.0a (TBA) signing — mirrors the working client-api implementation.
+   */
   private getOAuth1Headers(method: string, url: string): Record<string, string> {
-    // OAuth 1.0a implementation would go here
-    // For now, return empty - full implementation in netsuite-api-client
-    this.logger.warn('OAuth 1.0a not fully implemented in adapter');
-    return {};
+    // NetSuite requires the OAuth realm to be the account ID in canonical
+    // form: uppercase with underscores (e.g. 4325477_SB1). Stored values
+    // sometimes hold the URL/domain form (4325477-sb1), which NetSuite
+    // rejects with INVALID_LOGIN_ATTEMPT. Normalize defensively.
+    const rawRealm = this.config!.realm || this.config!.account;
+    const realm = rawRealm.toUpperCase().replace(/-/g, '_');
+
+    const consumerKey = this.config!.consumerKey!;
+    const consumerSecret = this.config!.consumerSecret!;
+    const token = this.config!.token!;
+    const tokenSecret = this.config!.tokenSecret!;
+
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(16).toString('hex');
+
+    const urlObj = new URL(url);
+    const baseUrl = `${urlObj.origin}${urlObj.pathname}`;
+
+    // Collect all params (query + oauth)
+    const params: [string, string][] = [];
+    urlObj.searchParams.forEach((value, key) => {
+      params.push([key, value]);
+    });
+
+    params.push(['oauth_consumer_key', consumerKey]);
+    params.push(['oauth_nonce', nonce]);
+    params.push(['oauth_signature_method', 'HMAC-SHA256']);
+    params.push(['oauth_timestamp', timestamp]);
+    params.push(['oauth_token', token]);
+    params.push(['oauth_version', '1.0']);
+
+    params.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+
+    const paramString = params
+      .map(([k, v]) => `${this.percentEncode(k)}=${this.percentEncode(v)}`)
+      .join('&');
+
+    const signatureBase = `${method.toUpperCase()}&${this.percentEncode(baseUrl)}&${this.percentEncode(paramString)}`;
+    const signingKey = `${this.percentEncode(consumerSecret)}&${this.percentEncode(tokenSecret)}`;
+    const signature = crypto
+      .createHmac('sha256', signingKey)
+      .update(signatureBase)
+      .digest('base64');
+
+    const headerParts = [
+      `realm="${this.percentEncode(realm)}"`,
+      `oauth_consumer_key="${this.percentEncode(consumerKey)}"`,
+      `oauth_nonce="${this.percentEncode(nonce)}"`,
+      `oauth_signature="${this.percentEncode(signature)}"`,
+      `oauth_signature_method="HMAC-SHA256"`,
+      `oauth_timestamp="${timestamp}"`,
+      `oauth_token="${this.percentEncode(token)}"`,
+      `oauth_version="1.0"`,
+    ];
+
+    return { Authorization: `OAuth ${headerParts.join(', ')}` };
+  }
+
+  /**
+   * Percent-encode per OAuth 1.0a spec (RFC 5849)
+   */
+  private percentEncode(str: string): string {
+    return encodeURIComponent(str)
+      .replace(/!/g, '%21')
+      .replace(/\*/g, '%2A')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29');
   }
 }
 

@@ -1,15 +1,13 @@
 import {
   Injectable,
   NotFoundException,
-  ConflictException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
 import { TenantDb, users, User } from '@org/database';
-import { LoginDto, RegisterDto } from './dto/index.js';
-import * as crypto from 'crypto';
+import { LoginDto } from './dto/index.js';
+import { hashPassword } from './password.util.js';
 
 // User without password hash
 export type SafeUser = Omit<User, 'passwordHash'>;
@@ -17,12 +15,6 @@ export type SafeUser = Omit<User, 'passwordHash'>;
 @Injectable()
 export class AuthService {
   constructor(private readonly jwtService: JwtService) {}
-
-  private hashPassword(password: string): string {
-    // Using SHA-256 for password hashing
-    // In production, consider using bcrypt or argon2
-    return crypto.createHash('sha256').update(password).digest('hex');
-  }
 
   async findById(db: TenantDb, id: string): Promise<SafeUser> {
     const result = await db.select().from(users).where(eq(users.id, id));
@@ -40,33 +32,6 @@ export class AuthService {
     return result.length > 0 ? result[0] : null;
   }
 
-  async register(db: TenantDb, registerDto: RegisterDto): Promise<SafeUser> {
-    // Check if email already exists
-    const existing = await this.findByEmail(db, registerDto.email);
-
-    if (existing) {
-      throw new ConflictException(
-        `User with email "${registerDto.email}" already exists`
-      );
-    }
-
-    const id = uuidv4();
-    const now = new Date();
-
-    await db.insert(users).values({
-      id,
-      email: registerDto.email,
-      firstName: registerDto.firstName || null,
-      lastName: registerDto.lastName || null,
-      passwordHash: this.hashPassword(registerDto.password),
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    return this.findById(db, id);
-  }
-
   async validateUser(
     db: TenantDb,
     email: string,
@@ -78,7 +43,7 @@ export class AuthService {
       return null;
     }
 
-    const hashedPassword = this.hashPassword(password);
+    const hashedPassword = hashPassword(password);
     if (user.passwordHash !== hashedPassword) {
       return null;
     }

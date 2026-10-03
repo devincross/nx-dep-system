@@ -2,10 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
+import { CertificateGeneratorService } from './certificate-generator.service';
+import { CsrGeneratorService } from './csr-generator.service';
 
 describe('CredentialsController', () => {
   let controller: CredentialsController;
-  let service: CredentialsService;
 
   const mockCredential = {
     id: 1,
@@ -42,11 +43,18 @@ describe('CredentialsController', () => {
           provide: CredentialsService,
           useValue: mockCredentialsService,
         },
+        {
+          provide: CertificateGeneratorService,
+          useValue: {},
+        },
+        {
+          provide: CsrGeneratorService,
+          useValue: {},
+        },
       ],
     }).compile();
 
     controller = module.get<CredentialsController>(CredentialsController);
-    service = module.get<CredentialsService>(CredentialsService);
   });
 
   afterEach(() => {

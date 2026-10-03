@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as mysql from 'mysql2/promise';
 import { eq, and } from 'drizzle-orm';
@@ -12,9 +12,12 @@ import {
 } from '@org/database';
 import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
+import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
+import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
+import { AccountRepository } from '../infrastructure/repositories/account.repository.js';
 
 @Injectable()
 export class DepPushScheduler {
@@ -22,10 +25,6 @@ export class DepPushScheduler {
 
   constructor(
     private readonly depPushUseCase: DepPushChangesUseCase,
-    private readonly depAdapter: DepSyncAdapter,
-    private readonly depTransactionRepo: DepTransactionRepository,
-    private readonly orderRepository: OrderRepository,
-    private readonly orderChangeRepository: OrderChangeRepository,
   ) {}
 
   /**
@@ -94,32 +93,39 @@ export class DepPushScheduler {
     });
 
     try {
-      const tenantDb = drizzle(connection) as TenantDb;
+      const tenantDb = drizzle(connection) as unknown as TenantDb;
 
       // Get DEP credentials
       const depCred = await this.getDepCredentials(tenantDb);
       if (!depCred) return; // No DEP credentials — skip silently
 
-      // Get the customer ID (depAccountId from the account or from credentials)
-      const customerId = depCred.customerId;
-      if (!customerId) {
-        this.logger.warn(`No DEP customer ID configured for tenant ${tenant.slug}`);
-        return;
-      }
+      // Fresh adapter + repository instances per run — the schedulers run
+      // concurrently and shared singletons get re-pointed at connections
+      // that are closed when the other scheduler finishes.
+      const depAdapter = new DepSyncAdapter();
+      const depTransactionRepo = new DepTransactionRepository();
+      const orderRepository = new OrderRepository();
+      const orderChangeRepository = new OrderChangeRepository();
+      const accountRepository = new AccountRepository();
 
-      // Configure adapter and repos
-      this.depAdapter.configure(depCred);
-      this.depTransactionRepo.setDb(tenantDb);
-      this.orderRepository.setDb(tenantDb);
-      this.orderChangeRepository.setDb(tenantDb);
-      this.orderRepository.setChangeRepository(this.orderChangeRepository);
+      depAdapter.configure(depCred);
+      depTransactionRepo.setDb(tenantDb);
+      orderRepository.setDb(tenantDb);
+      orderChangeRepository.setDb(tenantDb);
+      accountRepository.setDb(tenantDb);
+      orderRepository.setChangeRepository(orderChangeRepository);
+
+      // For pushing submission rejections back to the NetSuite order —
+      // null for tenants without NetSuite credentials
+      const netsuiteAdapter = await this.getNetsuiteAdapter(tenantDb);
 
       const result = await this.depPushUseCase.execute(
-        this.orderChangeRepository,
-        this.orderRepository,
-        this.depAdapter,
-        this.depTransactionRepo,
-        { customerId },
+        orderChangeRepository,
+        orderRepository,
+        depAdapter,
+        depTransactionRepo,
+        accountRepository,
+        netsuiteAdapter,
       );
 
       if (result.submitted > 0 || result.failed > 0) {
@@ -132,9 +138,26 @@ export class DepPushScheduler {
     }
   }
 
+  private async getNetsuiteAdapter(db: TenantDb): Promise<NetsuiteAdapter | null> {
+    const results = await db
+      .select()
+      .from(credentials)
+      .where(and(eq(credentials.type, 'netsuite'), eq(credentials.status, 'current')))
+      .limit(1);
+
+    if (results.length === 0) return null;
+
+    try {
+      return NetsuiteAdapter.fromConnectionData(parseConnectionData(results[0].connectionData));
+    } catch (error) {
+      this.logger.error(`Failed to parse NetSuite credentials: ${error}`);
+      return null;
+    }
+  }
+
   private async getDepCredentials(
     db: TenantDb,
-  ): Promise<(DepAdapterConfig & { customerId: string }) | null> {
+  ): Promise<DepAdapterConfig | null> {
     const results = await db
       .select()
       .from(credentials)
@@ -145,8 +168,9 @@ export class DepPushScheduler {
 
     let data: Record<string, unknown>;
     try {
-      data = JSON.parse(results[0].connectionData) as Record<string, unknown>;
-    } catch {
+      data = parseConnectionData(results[0].connectionData);
+    } catch (error) {
+      this.logger.error(`Failed to parse DEP credentials: ${error}`);
       return null;
     }
 
@@ -155,10 +179,9 @@ export class DepPushScheduler {
     const depResellerId = data['dep_reseller_id'] as string;
     const sslKey = data['ssl_key'] as string;
     const sslCert = data['ssl_cert'] as string;
-    const customerId = data['sap_sold_to'] as string;
 
     if (!apiUrl || !shipTo || !depResellerId || !sslKey || !sslCert) return null;
 
-    return { apiUrl, shipTo, depResellerId, sslKey, sslCert, customerId };
+    return { apiUrl, shipTo, depResellerId, sslKey, sslCert };
   }
 }
