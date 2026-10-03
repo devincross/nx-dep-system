@@ -67,7 +67,7 @@ export class DepActionsService {
       }
     }
 
-    return { transactionId: txnId, response };
+    return { transactionId: txnId, response, ...this.submissionOutcome(response) };
   }
 
   async returnDevices(db: TenantDb, orderId: number, serialNumbers?: string[]) {
@@ -96,7 +96,7 @@ export class DepActionsService {
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
     await this.logTransaction(db, orderId, txnId, 'RE', request, response);
-    return { transactionId: txnId, response };
+    return { transactionId: txnId, response, ...this.submissionOutcome(response) };
   }
 
   async voidOrder(db: TenantDb, orderId: number) {
@@ -114,7 +114,7 @@ export class DepActionsService {
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
     await this.logTransaction(db, orderId, txnId, 'VD', request, response);
-    return { transactionId: txnId, response };
+    return { transactionId: txnId, response, ...this.submissionOutcome(response) };
   }
 
   async overrideOrder(db: TenantDb, orderId: number, customerId?: string) {
@@ -140,7 +140,24 @@ export class DepActionsService {
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
     await this.logTransaction(db, orderId, txnId, 'OV', request, response);
-    return { transactionId: txnId, response };
+    return { transactionId: txnId, response, ...this.submissionOutcome(response) };
+  }
+
+  /**
+   * Whether Apple accepted a submission. Apple answers HTTP 200 even for
+   * rejections, so callers need this to tell the user what really happened.
+   * Acceptance only means the request is queued — the final result arrives
+   * when the poller resolves the transaction.
+   */
+  private submissionOutcome(response: unknown): { accepted: boolean; errorMessage: string | null } {
+    const resp = response as any;
+    const accepted = !!resp.deviceEnrollmentTransactionId && !resp.errorCode && !resp.errorMessage;
+    return {
+      accepted,
+      errorMessage: accepted
+        ? null
+        : resp.errorMessage || resp.errorCode || 'Apple did not accept the submission.',
+    };
   }
 
   async getDepStatus(db: TenantDb, orderId: number) {
