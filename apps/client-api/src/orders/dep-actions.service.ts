@@ -22,6 +22,12 @@ interface DepCredentials {
   sslCert: string;
 }
 
+export interface ConnectionTestResult {
+  ok: boolean;
+  message: string;
+  detail?: string;
+}
+
 @Injectable()
 export class DepActionsService {
   private readonly logger = new Logger(DepActionsService.name);
@@ -159,6 +165,82 @@ export class DepActionsService {
         ? null
         : resp.errorMessage || resp.errorCode || 'Apple did not accept the submission.',
     };
+  }
+
+  /**
+   * Check the saved DEP credentials without touching any real order: sends a
+   * read-only show-order-details for an order number that cannot exist. A
+   * valid JSON reply proves our certificate and reseller ID got through to
+   * Apple; "order not found" is the expected answer. Any other Apple error
+   * is reported verbatim so the user can judge it — we don't pretend to know
+   * every Apple error code.
+   */
+  async testDepConnection(db: TenantDb): Promise<ConnectionTestResult> {
+    const cred = await this.getDepCredentials(db);
+    if (!cred) return { ok: false, message: 'No active DEP credentials are configured.' };
+    const missing = (['apiUrl', 'shipTo', 'depResellerId', 'sslKey', 'sslCert'] as const).filter((k) => !cred[k]);
+    if (missing.length > 0) {
+      return { ok: false, message: `DEP credentials are incomplete (missing ${missing.join(', ')}).` };
+    }
+
+    try {
+      const response = (await this.callDep(cred, '/enroll-service/1.0/show-order-details', {
+        requestContext: { shipTo: cred.shipTo, timeZone: '420', langCode: 'en' },
+        depResellerId: cred.depResellerId,
+        orderNumbers: [`CONNECTION_TEST_${Date.now()}`],
+      })) as any;
+
+      const apple = [response.errorCode, response.errorMessage].filter(Boolean).join(': ');
+      if (!apple || /not\s*found|no\s+orders?|does not exist/i.test(apple)) {
+        return { ok: true, message: 'Connected to Apple — your certificate and reseller ID were accepted.' };
+      }
+      return {
+        ok: false,
+        message: 'Apple answered, but reported a problem with these credentials or settings.',
+        detail: apple,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        message: 'Could not reach Apple with these credentials. Check the certificate, private key and API URL.',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * Check the saved Zoho credentials: refresh an access token, then make a
+   * one-record read of the orders module (the same access the sync needs).
+   */
+  async testZohoConnection(db: TenantDb): Promise<ConnectionTestResult> {
+    const cred = await this.credentialsService.findNewestActiveByType(db, 'zoho');
+    if (!cred) return { ok: false, message: 'No active Zoho credentials are configured.' };
+    const data = cred.connectionData as Record<string, unknown>;
+
+    try {
+      const token = await this.getZohoAccessToken(data);
+      const apiDomain = (data['api_domain'] as string) || 'https://www.zohoapis.com';
+      const ordersModule = (data['orders_module'] as string) || 'Sales_Orders';
+      const resp = await fetch(`${apiDomain}/crm/v3/${ordersModule}?fields=id&per_page=1`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      });
+      // 204 = module readable but empty
+      if (resp.ok || resp.status === 204) {
+        return { ok: true, message: `Connected to Zoho — the ${ordersModule} module is readable.` };
+      }
+      const body = (await resp.json().catch(() => null)) as { message?: string; code?: string } | null;
+      return {
+        ok: false,
+        message: `Zoho rejected the request to read ${ordersModule}.`,
+        detail: body?.message || body?.code || `HTTP ${resp.status}`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        message: 'Could not get a Zoho access token. Check the client ID, client secret and refresh token.',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   async getDepStatus(db: TenantDb, orderId: number) {
