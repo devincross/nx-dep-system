@@ -103,6 +103,9 @@ function getStatusColor(isActive: boolean) {
           {{ new Date(item.createdAt).toLocaleDateString() }}
         </template>
         <template v-slot:item.actions="{ item }">
+          <v-btn icon size="small" :to="`/tenants/${item.id}/users`" title="Manage users">
+            <v-icon>mdi-account-multiple</v-icon>
+          </v-btn>
           <v-btn icon size="small" :to="`/tenants/${item.id}/edit`">
             <v-icon>mdi-pencil</v-icon>
           </v-btn>

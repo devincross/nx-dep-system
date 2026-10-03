@@ -101,3 +101,34 @@ export interface UpdateDomainDto {
   isPrimary?: boolean;
 }
 
+
+// Users inside a client's (tenant's) own database
+export type TenantUserRole = 'admin' | 'user';
+
+export interface TenantUser {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  role: TenantUserRole;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateTenantUserDto {
+  email: string;
+  password: string;
+  role?: TenantUserRole;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface UpdateTenantUserDto {
+  email?: string;
+  password?: string;
+  role?: TenantUserRole;
+  isActive?: boolean;
+  firstName?: string;
+  lastName?: string;
+}

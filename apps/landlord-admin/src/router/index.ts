@@ -52,6 +52,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/tenants/:id/users',
+      name: 'tenants-users',
+      component: () => import('../views/tenants/TenantUsersView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/tenants/:id/edit',
       name: 'tenants-edit',
       component: () => import('../views/tenants/TenantFormView.vue'),
