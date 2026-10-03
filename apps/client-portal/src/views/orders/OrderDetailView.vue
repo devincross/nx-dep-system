@@ -618,7 +618,7 @@ onMounted(() => {
         <v-card-text>
           <v-text-field v-model="newItemSerialNumber" label="Serial Number" required></v-text-field>
           <v-select v-model="newItemDepStatus" :items="depStatuses" label="Enrollment Status" required></v-select>
-          <v-checkbox v-model="newItemIsDep" label="Eligible for Apple Enrollment"></v-checkbox>
+          <v-checkbox v-model="newItemIsDep" label="Eligible for Apple Enrollment" :hint="newItemIsDep ? 'Submitted to Apple automatically within about 10 minutes.' : ''" persistent-hint></v-checkbox>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>

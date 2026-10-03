@@ -225,6 +225,9 @@ onMounted(() => {
                 persistent-hint
               ></v-textarea>
               <v-checkbox v-model="newItemsAreDep" label="DEP devices" density="compact" hide-details></v-checkbox>
+              <div v-if="newItemsAreDep" class="text-caption text-grey mt-1">
+                DEP devices are submitted to Apple Device Enrollment automatically within about 10 minutes of saving.
+              </div>
             </v-col>
           </v-row>
         </v-form>

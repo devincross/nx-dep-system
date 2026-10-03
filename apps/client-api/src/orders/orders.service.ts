@@ -456,9 +456,33 @@ export class OrdersService {
 
     const insertId = Number(result[0].insertId);
 
-    // Insert order items if provided
+    // Insert order items if provided (the order-level change below covers them)
     if (createOrderDto.items && createOrderDto.items.length > 0) {
-      await this.createOrderItems(db, insertId, createOrderDto.items);
+      await this.createOrderItems(db, insertId, createOrderDto.items, { recordChanges: false });
+    }
+
+    // Record change rows (same shape the sync and import write) so the DEP
+    // push scheduler enrolls this order on its next run
+    await db.insert(orderChanges).values({
+      orderId: insertId,
+      changeType: 'created',
+      snapshot: JSON.stringify({
+        id: insertId,
+        externalOrderId: createOrderDto.externalOrderId,
+        externalAccountId: createOrderDto.externalAccountId,
+        externalOrderStatus: createOrderDto.externalOrderStatus,
+        status: createOrderDto.status,
+        po: createOrderDto.po,
+        source: createOrderDto.source,
+      }),
+      createdAt: now,
+    });
+    const created = await db
+      .select()
+      .from(orderItems)
+      .where(and(eq(orderItems.orderId, insertId), isNull(orderItems.deletedAt)));
+    if (created.length > 0) {
+      await this.recordItemsAdded(db, insertId, created, now);
     }
 
     return this.findOne(db, insertId);
@@ -471,16 +495,19 @@ export class OrdersService {
   async createOrderItems(
     db: TenantDb,
     orderId: number,
-    items: CreateOrderItemDto[]
+    items: CreateOrderItemDto[],
+    opts: { recordChanges?: boolean } = {},
   ): Promise<OrderItem[]> {
+    const { recordChanges = true } = opts;
     // Normalize serial numbers (strip leading S) and validate uniqueness
     const serialNumbers = items.map((item) => normalizeSerial(item.serialNumber));
     await this.validateSerialNumbersUnique(db, serialNumbers);
 
     const now = new Date();
+    const insertedIds: number[] = [];
 
     for (const item of items) {
-      await db.insert(orderItems).values({
+      const result = await db.insert(orderItems).values({
         orderId,
         isDep: item.isDep ?? false,
         serialNumber: normalizeSerial(item.serialNumber),
@@ -488,6 +515,7 @@ export class OrdersService {
         createdAt: now,
         updatedAt: now,
       });
+      insertedIds.push(Number(result[0].insertId));
     }
 
     const createdItems = await db
@@ -495,7 +523,36 @@ export class OrdersService {
       .from(orderItems)
       .where(and(eq(orderItems.orderId, orderId), isNull(orderItems.deletedAt)));
 
+    // Devices added to an existing order are enrolled by the push scheduler
+    if (recordChanges) {
+      await this.recordItemsAdded(
+        db,
+        orderId,
+        createdItems.filter((i) => insertedIds.includes(i.id)),
+        now,
+      );
+    }
+
     return createdItems;
+  }
+
+  /** Record 'added' item changes so the DEP push scheduler enrolls the devices */
+  private async recordItemsAdded(db: TenantDb, orderId: number, items: OrderItem[], at: Date): Promise<void> {
+    if (items.length === 0) return;
+    await db.insert(orderItemChanges).values(
+      items.map((item) => ({
+        orderId,
+        orderItemId: item.id,
+        serialNumber: item.serialNumber,
+        changeType: 'added' as const,
+        snapshot: JSON.stringify({
+          serialNumber: item.serialNumber,
+          isDep: item.isDep,
+          depStatus: item.depStatus,
+        }),
+        createdAt: at,
+      })),
+    );
   }
 
   /**
