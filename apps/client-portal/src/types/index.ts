@@ -208,6 +208,25 @@ export interface NetsuiteResponse<T = unknown> {
   error?: string;
 }
 
+// Zoho types
+export interface ZohoStatus {
+  id: number;
+  status: CredentialStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ZohoTestResult {
+  success: boolean;
+  message: string;
+}
+
+export interface ZohoResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
 // Tenant info
 export type ConnectionType = 'netsuite' | 'zoho';
 
