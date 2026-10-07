@@ -18,12 +18,6 @@ const accountsResponse = ref<ZohoResponse | null>(null);
 const ordersSince = ref('');
 const accountsSince = ref('');
 
-// Generic module read
-const moduleName = ref('');
-const moduleSince = ref('');
-const modulePerPage = ref('50');
-const moduleResponse = ref<ZohoResponse | null>(null);
-
 async function loadStatus() {
   loading.value = true;
   error.value = '';
@@ -75,22 +69,6 @@ async function fetchAccounts() {
   }
 }
 
-async function readModule() {
-  loading.value = true;
-  error.value = '';
-  moduleResponse.value = null;
-  try {
-    const query: Record<string, string> = { module: moduleName.value };
-    if (moduleSince.value) query['since'] = moduleSince.value;
-    if (modulePerPage.value) query['per_page'] = modulePerPage.value;
-    moduleResponse.value = await zohoStore.fetchModule(query);
-  } catch (err: any) {
-    error.value = err.response?.data?.message || 'Unable to read the Zoho module. Please check the module name and try again.';
-  } finally {
-    loading.value = false;
-  }
-}
-
 onMounted(() => { loadStatus(); });
 </script>
 
@@ -102,7 +80,6 @@ onMounted(() => { loadStatus(); });
       <v-tab value="status">Connection Status</v-tab>
       <v-tab value="orders">Orders</v-tab>
       <v-tab value="accounts">Accounts</v-tab>
-      <v-tab value="module">Custom Module</v-tab>
     </v-tabs>
     <v-tabs-window v-model="activeTab">
       <!-- Status Tab -->
@@ -170,26 +147,6 @@ onMounted(() => { loadStatus(); });
           <v-card-text v-if="accountsResponse">
             <v-alert :type="accountsResponse.success ? 'success' : 'error'" class="mb-4">{{ accountsResponse.success ? 'Success' : accountsResponse.error }}</v-alert>
             <pre v-if="accountsResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(accountsResponse.data, null, 2) }}</pre>
-          </v-card-text>
-        </v-card>
-      </v-tabs-window-item>
-      <!-- Generic Module Tab -->
-      <v-tabs-window-item value="module">
-        <v-card class="mt-4">
-          <v-card-title>Read a Module</v-card-title>
-          <v-card-text>
-            <v-row>
-              <v-col cols="12" md="5"><v-text-field v-model="moduleName" label="Module API Name" hint="e.g. Contacts, Deals, Sales_Orders" persistent-hint required></v-text-field></v-col>
-              <v-col cols="12" md="4"><v-text-field v-model="moduleSince" type="date" label="Modified Since" clearable></v-text-field></v-col>
-              <v-col cols="12" md="3"><v-text-field v-model="modulePerPage" type="number" label="Per Page" hint="Max 200" persistent-hint></v-text-field></v-col>
-            </v-row>
-          </v-card-text>
-          <v-card-actions>
-            <v-btn color="primary" :loading="loading" @click="readModule" :disabled="!moduleName" prepend-icon="mdi-send">Read Module</v-btn>
-          </v-card-actions>
-          <v-card-text v-if="moduleResponse">
-            <v-alert :type="moduleResponse.success ? 'success' : 'error'" class="mb-4">{{ moduleResponse.success ? 'Success' : moduleResponse.error }}</v-alert>
-            <pre v-if="moduleResponse.data" class="bg-grey-lighten-4 pa-4 rounded">{{ JSON.stringify(moduleResponse.data, null, 2) }}</pre>
           </v-card-text>
         </v-card>
       </v-tabs-window-item>

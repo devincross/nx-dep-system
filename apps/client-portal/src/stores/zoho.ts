@@ -65,20 +65,6 @@ export const useZohoStore = defineStore('zoho', () => {
     }
   }
 
-  async function fetchModule(query: Record<string, unknown>): Promise<ZohoResponse> {
-    loading.value = true;
-    error.value = null;
-    try {
-      const response = await api.get<ZohoResponse>('/zoho/module', { params: query });
-      return response.data;
-    } catch (err: any) {
-      error.value = err.response?.data?.message || 'Failed to read Zoho module';
-      throw err;
-    } finally {
-      loading.value = false;
-    }
-  }
-
   return {
     status,
     loading,
@@ -87,6 +73,5 @@ export const useZohoStore = defineStore('zoho', () => {
     testConnection,
     getOrders,
     getAccounts,
-    fetchModule,
   };
 });
