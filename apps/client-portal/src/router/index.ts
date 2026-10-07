@@ -86,6 +86,13 @@ const router = createRouter({
       component: () => import('../views/NetsuiteView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true },
     },
+    // Zoho route (admin only)
+    {
+      path: '/zoho',
+      name: 'zoho',
+      component: () => import('../views/ZohoView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
     // User management (admin only)
     {
       path: '/users',

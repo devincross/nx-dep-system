@@ -1,15 +1,28 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { RouterView, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useTenantStore } from '../stores/tenant';
 import { notification } from '../composables/useNotify';
 
 const drawer = ref(true);
 const router = useRouter();
 const authStore = useAuthStore();
+const tenantStore = useTenantStore();
 
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const user = computed(() => authStore.user);
+
+// Load the tenant's ERP type so the nav can show the right integration page.
+watch(
+  isAuthenticated,
+  (authed) => {
+    if (authed && !tenantStore.connectionType) {
+      tenantStore.fetchTenantInfo();
+    }
+  },
+  { immediate: true }
+);
 
 const menuItems = computed(() => {
   const items = [
@@ -18,11 +31,13 @@ const menuItems = computed(() => {
     { title: 'Accounts', icon: 'mdi-account-multiple', to: '/accounts' },
   ];
   if (authStore.isAdmin) {
-    items.push(
-      { title: 'Credentials', icon: 'mdi-key-variant', to: '/credentials' },
-      { title: 'NetSuite', icon: 'mdi-cloud-sync', to: '/netsuite' },
-      { title: 'Users', icon: 'mdi-account-cog', to: '/users' },
-    );
+    items.push({ title: 'Credentials', icon: 'mdi-key-variant', to: '/credentials' });
+    if (tenantStore.connectionType === 'netsuite') {
+      items.push({ title: 'NetSuite', icon: 'mdi-cloud-sync', to: '/netsuite' });
+    } else if (tenantStore.connectionType === 'zoho') {
+      items.push({ title: 'Zoho', icon: 'mdi-cloud-sync', to: '/zoho' });
+    }
+    items.push({ title: 'Users', icon: 'mdi-account-cog', to: '/users' });
   }
   return items;
 });

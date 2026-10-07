@@ -9,7 +9,10 @@ import {
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
 import { Roles } from '../auth/decorators/index.js';
+import { CurrentTenant } from '../tenant/tenant.decorator.js';
+import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { ZohoOAuthService } from './zoho-oauth.service.js';
+import { ZohoService } from './zoho.service.js';
 
 class AuthUrlQueryDto {
   @IsString()
@@ -77,7 +80,10 @@ class ExchangeGrantTokenDto {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 export class ZohoController {
-  constructor(private readonly zohoOAuthService: ZohoOAuthService) {}
+  constructor(
+    private readonly zohoOAuthService: ZohoOAuthService,
+    private readonly zohoService: ZohoService
+  ) {}
 
   /**
    * Get available Zoho data centers
@@ -85,6 +91,61 @@ export class ZohoController {
   @Get('data-centers')
   getDataCenters() {
     return this.zohoOAuthService.getDataCenters();
+  }
+
+  /**
+   * Current Zoho credential status (without sensitive data).
+   */
+  @Get('status')
+  getStatus(@CurrentTenant() tenant: TenantContext) {
+    return this.zohoService.getStatus(tenant.db);
+  }
+
+  /**
+   * Test the Zoho connection by reading one record from the orders module.
+   */
+  @Get('test')
+  testConnection(@CurrentTenant() tenant: TenantContext) {
+    return this.zohoService.testConnection(tenant.db);
+  }
+
+  /**
+   * Read records from the configured orders (sales orders) module.
+   * Query: since (ISO/date, optional), per_page (optional).
+   */
+  @Get('orders')
+  getOrders(
+    @CurrentTenant() tenant: TenantContext,
+    @Query() query: { since?: string; per_page?: string }
+  ) {
+    return this.zohoService.getOrders(tenant.db, query);
+  }
+
+  /**
+   * Read records from the configured accounts module.
+   * Query: since (ISO/date, optional), per_page (optional).
+   */
+  @Get('accounts')
+  getAccounts(
+    @CurrentTenant() tenant: TenantContext,
+    @Query() query: { since?: string; per_page?: string }
+  ) {
+    return this.zohoService.getAccounts(tenant.db, query);
+  }
+
+  /**
+   * Read records from an arbitrary Zoho CRM module (diagnostic, read-only).
+   * Query: module (required), since (optional), per_page (optional).
+   */
+  @Get('module')
+  fetchModule(
+    @CurrentTenant() tenant: TenantContext,
+    @Query() query: { module?: string; since?: string; per_page?: string }
+  ) {
+    if (!query.module) {
+      return { success: false, error: 'A module name is required.' };
+    }
+    return this.zohoService.fetchModule(tenant.db, query.module, query);
   }
 
   /**
