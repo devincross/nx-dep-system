@@ -6,30 +6,70 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards/index.js';
 import { Roles } from '../auth/decorators/index.js';
 import { ZohoOAuthService } from './zoho-oauth.service.js';
 
 class AuthUrlQueryDto {
+  @IsString()
+  @IsNotEmpty()
   client_id!: string;
+
+  @IsString()
+  @IsNotEmpty()
   redirect_uri!: string;
+
+  @IsOptional()
+  @IsString()
   data_center?: string;
+
+  @IsOptional()
+  @IsString()
   scopes?: string;
 }
 
 class ExchangeCodeDto {
+  @IsString()
+  @IsNotEmpty()
   code!: string;
+
+  @IsString()
+  @IsNotEmpty()
   client_id!: string;
+
+  @IsString()
+  @IsNotEmpty()
   client_secret!: string;
+
+  @IsString()
+  @IsNotEmpty()
   redirect_uri!: string;
+
+  @IsOptional()
+  @IsString()
   accounts_server?: string;
+
+  @IsOptional()
+  @IsString()
   data_center?: string;
 }
 
 class ExchangeGrantTokenDto {
+  @IsString()
+  @IsNotEmpty()
   grant_token!: string;
+
+  @IsString()
+  @IsNotEmpty()
   client_id!: string;
+
+  @IsString()
+  @IsNotEmpty()
   client_secret!: string;
+
+  @IsOptional()
+  @IsString()
   data_center?: string;
 }
 
