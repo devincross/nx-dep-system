@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
 
@@ -30,8 +30,6 @@ const TOKEN_URL = 'https://accounts.zoho.com/oauth/v2/token';
 
 @Injectable()
 export class ZohoService {
-  private readonly logger = new Logger(ZohoService.name);
-
   constructor(private readonly credentialsService: CredentialsService) {}
 
   /**
@@ -126,7 +124,7 @@ export class ZohoService {
    */
   async testConnection(db: TenantDb): Promise<{ success: boolean; message: string }> {
     const credential = await this.getZohoCredential(db);
-    const data = credential.connectionData as ZohoConnectionData;
+    const data = credential.connectionData as unknown as ZohoConnectionData;
     const ordersModule = data.orders_module || DEFAULT_ORDERS_MODULE;
     const result = await this.readModule(data, ordersModule, { fields: 'id', per_page: '1' });
     return result.success
@@ -136,13 +134,13 @@ export class ZohoService {
 
   async getOrders(db: TenantDb, query: { since?: string; per_page?: string }): Promise<ZohoResponse> {
     const credential = await this.getZohoCredential(db);
-    const data = credential.connectionData as ZohoConnectionData;
+    const data = credential.connectionData as unknown as ZohoConnectionData;
     return this.readModule(data, data.orders_module || DEFAULT_ORDERS_MODULE, this.buildParams(query));
   }
 
   async getAccounts(db: TenantDb, query: { since?: string; per_page?: string }): Promise<ZohoResponse> {
     const credential = await this.getZohoCredential(db);
-    const data = credential.connectionData as ZohoConnectionData;
+    const data = credential.connectionData as unknown as ZohoConnectionData;
     return this.readModule(data, data.accounts_module || DEFAULT_ACCOUNTS_MODULE, this.buildParams(query));
   }
 
@@ -152,7 +150,7 @@ export class ZohoService {
     query: { since?: string; per_page?: string }
   ): Promise<ZohoResponse> {
     const credential = await this.getZohoCredential(db);
-    const data = credential.connectionData as ZohoConnectionData;
+    const data = credential.connectionData as unknown as ZohoConnectionData;
     return this.readModule(data, module, this.buildParams(query));
   }
 
