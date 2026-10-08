@@ -134,21 +134,6 @@ export class ZohoController {
   }
 
   /**
-   * Read records from an arbitrary Zoho CRM module (diagnostic, read-only).
-   * Query: module (required), since (optional), per_page (optional).
-   */
-  @Get('module')
-  fetchModule(
-    @CurrentTenant() tenant: TenantContext,
-    @Query() query: { module?: string; since?: string; per_page?: string }
-  ) {
-    if (!query.module) {
-      return { success: false, error: 'A module name is required.' };
-    }
-    return this.zohoService.fetchModule(tenant.db, query.module, query);
-  }
-
-  /**
    * Build the Zoho OAuth2 authorization URL.
    * The frontend redirects the user to this URL to authorize.
    */
