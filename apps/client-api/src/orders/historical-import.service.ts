@@ -266,24 +266,63 @@ export class HistoricalImportService {
       return accessToken;
     };
 
+    // The Get Records API requires an explicit `fields` list (resolved from
+    // the module's field metadata), or it returns records without the fields
+    // the mapper needs. Resolved once and reused across pages.
+    let fieldsList: string | null = null;
+    const resolveFields = async (token: string): Promise<string> => {
+      if (fieldsList) return fieldsList;
+      try {
+        const resp = await fetch(
+          `${apiDomain}/crm/v3/settings/fields?module=${encodeURIComponent(ordersModule)}`,
+          { headers: { Authorization: `Zoho-oauthtoken ${token}` } },
+        );
+        if (!resp.ok) return (fieldsList = 'id');
+        const body = (await resp.json().catch(() => null)) as
+          | { fields?: Array<{ api_name?: string }> }
+          | null;
+        const names = (body?.fields ?? [])
+          .map((f) => f.api_name)
+          .filter((n): n is string => !!n);
+        // Zoho's Get Records `fields` param is capped at 50.
+        return (fieldsList = names.length ? names.slice(0, 50).join(',') : 'id');
+      } catch {
+        return (fieldsList = 'id');
+      }
+    };
+
     return async (startDate, limit, page) => {
       const token = await getToken();
-      const params: Record<string, string> = {
+      const fields = await resolveFields(token);
+      const params = new URLSearchParams({
+        fields,
         per_page: String(limit),
         page: String(page),
-        criteria: `(Modified_Time:greater_than:${startDate.toISOString()})`,
-      };
-      const qs = new URLSearchParams(params).toString();
+      });
+      // The Get Records API has no `criteria` param; filter by last-modified
+      // via the If-Modified-Since header instead.
       const resp = await fetch(
-        `${apiDomain}/crm/v3/${ordersModule}?${qs}`,
+        `${apiDomain}/crm/v3/${ordersModule}?${params.toString()}`,
         {
           headers: {
             Authorization: `Zoho-oauthtoken ${token}`,
-            'Content-Type': 'application/json',
+            'If-Modified-Since': startDate.toISOString(),
           },
         },
       );
-      if (!resp.ok) return { data: [], hasMore: false };
+
+      // 204 = no records; 304 = nothing modified since startDate.
+      if (resp.status === 204 || resp.status === 304) {
+        return { data: [], hasMore: false };
+      }
+      if (!resp.ok) {
+        const err = (await resp.json().catch(() => null)) as
+          | { message?: string; code?: string }
+          | null;
+        throw new Error(
+          `Zoho orders fetch failed: ${err?.message || err?.code || `HTTP ${resp.status}`}`,
+        );
+      }
       const body = (await resp.json()) as {
         data?: Record<string, unknown>[];
         info?: { more_records?: boolean };
