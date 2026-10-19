@@ -69,9 +69,9 @@ describe('ZohoAdapter.fetchOrders', () => {
     expect(result).toEqual({ data: [{ id: '1' }], hasMore: false, totalCount: 1 });
   });
 
-  it('auto-paginates when no explicit page is given and resolves fields once', async () => {
+  it('auto-paginates by cursor (page_token), never by page offset, and resolves fields once', async () => {
     mockFetch([
-      { ok: true, status: 200, body: { data: [{ id: '1' }], info: { more_records: true } } },
+      { ok: true, status: 200, body: { data: [{ id: '1' }], info: { more_records: true, next_page_token: 'TKN1' } } },
       { ok: true, status: 200, body: { data: [{ id: '2' }], info: { more_records: false } } },
     ]);
 
@@ -79,7 +79,15 @@ describe('ZohoAdapter.fetchOrders', () => {
 
     expect(result.data).toEqual([{ id: '1' }, { id: '2' }]);
     expect(result.hasMore).toBe(false);
-    expect(moduleCalls()).toHaveLength(2);
+    const mcalls = moduleCalls();
+    expect(mcalls).toHaveLength(2);
+    // First request has no cursor; second must carry page_token and never a
+    // page offset (offset pagination 400s past 2000 records on Zoho).
+    // Match the `page` offset param at a boundary — `per_page=`/`page_token=` must not trip it.
+    expect(mcalls[0].url).not.toContain('page_token');
+    expect(mcalls[0].url).not.toMatch(/[?&]page=/);
+    expect(mcalls[1].url).toContain('page_token=TKN1');
+    expect(mcalls[1].url).not.toMatch(/[?&]page=/);
     // Field metadata resolved once and cached across both pages.
     expect(calls.filter((c) => c.url.includes('settings/fields'))).toHaveLength(1);
   });

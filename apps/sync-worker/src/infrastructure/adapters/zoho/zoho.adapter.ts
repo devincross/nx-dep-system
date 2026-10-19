@@ -108,13 +108,23 @@ export class ZohoAdapter implements DataSourcePort {
     lastModified?: Date,
   ): Promise<{ data: unknown[]; totalCount: number }> {
     const allData: unknown[] = [];
-    let page = 1;
-    let hasMore = true;
+    if (!params['per_page']) {
+      params['per_page'] = '200'; // Zoho max per page
+    }
 
-    while (hasMore) {
-      params['page'] = String(page);
-      if (!params['per_page']) {
-        params['per_page'] = '200'; // Zoho max per page
+    // Zoho caps offset pagination (`page`) at 2000 records — beyond that it
+    // 400s with DISCRETE_PAGINATION_LIMIT_EXCEEDED. Use cursor pagination:
+    // the first request omits both, then each subsequent request passes the
+    // `next_page_token` from the previous response (mutually exclusive with
+    // `page`).
+    let pageToken: string | undefined;
+    let pages = 0;
+
+    do {
+      if (pageToken) {
+        params['page_token'] = pageToken;
+      } else {
+        delete params['page_token'];
       }
 
       const response = await this.makeRequest('GET', module, params, lastModified);
@@ -122,14 +132,13 @@ export class ZohoAdapter implements DataSourcePort {
       const info = response?.info ?? {};
 
       allData.push(...(data as unknown[]));
-      hasMore = info.more_records ?? false;
-      page++;
+      pageToken = info.next_page_token;
 
-      if (page > 500) {
-        this.logger.warn(`Pagination safety limit reached for module ${module} at page ${page}`);
+      if (++pages > 500) {
+        this.logger.warn(`Pagination safety limit reached for module ${module} at ${pages} pages`);
         break;
       }
-    }
+    } while (pageToken);
 
     return { data: allData, totalCount: allData.length };
   }
@@ -145,7 +154,7 @@ export class ZohoAdapter implements DataSourcePort {
     module: string,
     params?: Record<string, string>,
     lastModified?: Date,
-  ): Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number } }> {
+  ): Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number; next_page_token?: string } }> {
     this.ensureConfigured();
 
     const token = await this.getAccessToken();
@@ -182,7 +191,7 @@ export class ZohoAdapter implements DataSourcePort {
       throw new Error(`Zoho API error: ${response.status} - ${errorText}`);
     }
 
-    return response.json() as Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number } }>;
+    return response.json() as Promise<{ data?: unknown[]; info?: { more_records?: boolean; count?: number; next_page_token?: string } }>;
   }
 
   /**

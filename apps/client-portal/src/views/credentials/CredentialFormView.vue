@@ -88,7 +88,7 @@ const zohoFieldMappings = ref<{
   orderItems: Record<string, string>;
 }>({
   account: { externalAccountId: '', name: '', depAccountId: '' },
-  order: { externalOrderId: '', externalAccountId: '', externalOrderStatus: '', isDep: '', po: '' },
+  order: { externalOrderId: '', externalAccountId: '', externalOrderStatus: '', isDep: '', po: '', depOrderId: '', depOrderedAt: '', depShippedAt: '' },
   orderItems: { sourceField: '', serialNumbers: '', isDep: '' },
 });
 
@@ -105,6 +105,9 @@ const orderMappingFields = [
   { key: 'externalOrderStatus', label: 'Order Status', description: 'Status field on the order', default: 'Status' },
   { key: 'isDep', label: 'Enrollment Eligible', description: 'Field indicating if the order is eligible for Apple Device Enrollment', default: 'Is_DEP' },
   { key: 'po', label: 'Purchase Order', description: 'Purchase order number', default: 'PO_Number' },
+  { key: 'depOrderId', label: 'Enrollment Order Number', description: 'Order number used for Apple Device Enrollment (e.g. the sales-order number). Falls back to the External Order ID when empty.', default: 'DEP_Order_ID' },
+  { key: 'depOrderedAt', label: 'Enrollment Order Date', description: 'Order date sent to Apple Device Enrollment (optional)', default: 'DEP_Ordered_At' },
+  { key: 'depShippedAt', label: 'Enrollment Ship Date', description: 'Ship date sent to Apple Device Enrollment (optional)', default: 'DEP_Shipped_At' },
 ];
 
 const orderItemMappingFields = [
@@ -385,7 +388,7 @@ watch(type, (newType) => {
 
     zohoFieldMappings.value = {
       account: { externalAccountId: '', name: '', depAccountId: '' },
-      order: { externalOrderId: '', externalAccountId: '', externalOrderStatus: '', isDep: '', po: '' },
+      order: { externalOrderId: '', externalAccountId: '', externalOrderStatus: '', isDep: '', po: '', depOrderId: '', depOrderedAt: '', depShippedAt: '' },
       orderItems: { sourceField: '', serialNumbers: '', isDep: '' },
     };
     showFieldMappings.value = false;
@@ -427,7 +430,7 @@ async function loadCredential() {
         zohoFieldMappings.value.account = { externalAccountId: fm.account.externalAccountId ?? '', name: fm.account.name ?? '', depAccountId: fm.account.depAccountId ?? '' };
       }
       if (fm.order) {
-        zohoFieldMappings.value.order = { externalOrderId: fm.order.externalOrderId ?? '', externalAccountId: fm.order.externalAccountId ?? '', externalOrderStatus: fm.order.externalOrderStatus ?? '', isDep: fm.order.isDep ?? '', po: fm.order.po ?? '' };
+        zohoFieldMappings.value.order = { externalOrderId: fm.order.externalOrderId ?? '', externalAccountId: fm.order.externalAccountId ?? '', externalOrderStatus: fm.order.externalOrderStatus ?? '', isDep: fm.order.isDep ?? '', po: fm.order.po ?? '', depOrderId: fm.order.depOrderId ?? '', depOrderedAt: fm.order.depOrderedAt ?? '', depShippedAt: fm.order.depShippedAt ?? '' };
       }
       if (fm.orderItems) {
         zohoFieldMappings.value.orderItems = { sourceField: fm.orderItems.sourceField ?? '', serialNumbers: fm.orderItems.serialNumbers ?? '', isDep: fm.orderItems.isDep ?? '' };

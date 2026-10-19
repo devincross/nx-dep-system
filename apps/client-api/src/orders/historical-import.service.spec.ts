@@ -64,7 +64,7 @@ describe('HistoricalImportService Zoho fetcher', () => {
   });
 
   it('requests the resolved fields list and filters via the If-Modified-Since header', async () => {
-    mockFetch({ ok: true, status: 200, body: { data: [{ id: '1' }], info: { more_records: true } } });
+    mockFetch({ ok: true, status: 200, body: { data: [{ id: '1' }], info: { next_page_token: 'TKN1' } } });
 
     const result = await buildFetcher()(new Date('2024-01-01T00:00:00.000Z'), 50, 1);
 
@@ -78,7 +78,37 @@ describe('HistoricalImportService Zoho fetcher', () => {
     expect((call.init?.headers as Record<string, string>)['If-Modified-Since']).toBe(
       '2024-01-01T00:00:00.000Z',
     );
+    // hasMore reflects the presence of a cursor token.
     expect(result).toEqual({ data: [{ id: '1' }], hasMore: true });
+  });
+
+  it('pages by cursor token after the first page, never by page offset', async () => {
+    // First module response carries a token; the second ends the sequence.
+    let n = 0;
+    const bodies = [
+      { data: [{ id: '1' }], info: { next_page_token: 'TKN1' } },
+      { data: [{ id: '2' }], info: {} },
+    ];
+    calls = [];
+    global.fetch = jest.fn(async (url: any, init?: any) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+      if (u.includes('oauth/v2/token')) return { ok: true, status: 200, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('settings/fields')) return { ok: true, status: 200, json: async () => ({ fields: [{ api_name: 'id' }] }) } as any;
+      return { ok: true, status: 200, json: async () => bodies[n++] } as any;
+    }) as any;
+
+    const fetcher = buildFetcher();
+    const first = await fetcher(new Date('2024-01-01T00:00:00.000Z'), 50, 1);
+    const second = await fetcher(new Date('2024-01-01T00:00:00.000Z'), 50, 2);
+
+    const moduleCalls = calls.filter((c) => c.url.includes('/crm/v3/Sales_Orders'));
+    expect(first.hasMore).toBe(true);
+    expect(second.hasMore).toBe(false);
+    // Page 1 uses the page offset; page 2 switches to the cursor and drops it.
+    expect(moduleCalls[0].url).toMatch(/[?&]page=1/);
+    expect(moduleCalls[1].url).toContain('page_token=TKN1');
+    expect(moduleCalls[1].url).not.toMatch(/[?&]page=/);
   });
 
   it('resolves the field metadata only once across pages', async () => {
