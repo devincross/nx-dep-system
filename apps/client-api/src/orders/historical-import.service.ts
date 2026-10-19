@@ -291,14 +291,21 @@ export class HistoricalImportService {
       }
     };
 
+    // Zoho caps offset pagination (`page`) at 2000 records, then 400s with
+    // DISCRETE_PAGINATION_LIMIT_EXCEEDED. Page by cursor instead: the first
+    // request uses `page`, each subsequent one uses the previous response's
+    // `next_page_token` (carried across calls in this closure).
+    let nextPageToken: string | null = null;
+
     return async (startDate, limit, page) => {
       const token = await getToken();
       const fields = await resolveFields(token);
-      const params = new URLSearchParams({
-        fields,
-        per_page: String(limit),
-        page: String(page),
-      });
+      const params = new URLSearchParams({ fields, per_page: String(limit) });
+      if (nextPageToken) {
+        params.set('page_token', nextPageToken);
+      } else {
+        params.set('page', String(page));
+      }
       // The Get Records API has no `criteria` param; filter by last-modified
       // via the If-Modified-Since header instead.
       const resp = await fetch(
@@ -325,11 +332,12 @@ export class HistoricalImportService {
       }
       const body = (await resp.json()) as {
         data?: Record<string, unknown>[];
-        info?: { more_records?: boolean };
+        info?: { more_records?: boolean; next_page_token?: string };
       };
+      nextPageToken = body.info?.next_page_token ?? null;
       return {
         data: body.data ?? [],
-        hasMore: body.info?.more_records ?? false,
+        hasMore: Boolean(nextPageToken),
       };
     };
   }
