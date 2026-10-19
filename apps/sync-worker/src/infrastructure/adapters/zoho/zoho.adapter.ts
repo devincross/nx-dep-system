@@ -218,8 +218,15 @@ export class ZohoAdapter implements DataSourcePort {
           .filter((n): n is string => !!n);
         // Zoho's Get Records `fields` param is capped at 50.
         if (names.length) result = names.slice(0, MAX_FIELDS).join(',');
+      } else {
+        this.logger.warn(
+          `Could not read field metadata for ${module} (HTTP ${resp.status}) — ` +
+          `records will return only 'id'. Ensure the Zoho token has the ` +
+          `ZohoCRM.settings.fields.READ scope.`,
+        );
       }
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Field metadata lookup for ${module} failed: ${err}`);
       result = 'id';
     }
 

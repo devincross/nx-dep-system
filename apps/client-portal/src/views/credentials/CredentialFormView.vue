@@ -780,7 +780,7 @@ onMounted(() => {
                     {{ zohoConnected ? 'Connected' : 'Use Grant Token' }}
                   </v-btn>
                   <template v-if="showGrantTokenFlow && !zohoConnected">
-                    <v-text-field v-model="grantToken" label="Grant Token" placeholder="1000.abc123..." density="compact" variant="outlined" class="mb-2" hint="This token expires in 2-3 minutes. Make sure to use these scopes when generating it: ZohoCRM.modules.accounts.READ, ZohoCRM.modules.salesorders.READ" persistent-hint></v-text-field>
+                    <v-text-field v-model="grantToken" label="Grant Token" placeholder="1000.abc123..." density="compact" variant="outlined" class="mb-2" hint="This token expires in 2-3 minutes. Make sure to use these scopes when generating it: ZohoCRM.modules.accounts.READ, ZohoCRM.modules.salesorders.READ, ZohoCRM.settings.fields.READ" persistent-hint></v-text-field>
                     <v-btn color="primary" :loading="grantTokenLoading" @click="exchangeGrantToken" block size="small">Connect with Token</v-btn>
                   </template>
                 </v-card>

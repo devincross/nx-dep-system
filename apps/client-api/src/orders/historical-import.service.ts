@@ -277,7 +277,14 @@ export class HistoricalImportService {
           `${apiDomain}/crm/v3/settings/fields?module=${encodeURIComponent(ordersModule)}`,
           { headers: { Authorization: `Zoho-oauthtoken ${token}` } },
         );
-        if (!resp.ok) return (fieldsList = 'id');
+        if (!resp.ok) {
+          this.logger.warn(
+            `Could not read Zoho field metadata for ${ordersModule} (HTTP ${resp.status}) — ` +
+            `orders will import with only 'id'. The token likely lacks the ` +
+            `ZohoCRM.settings.fields.READ scope; reconnect with that scope added.`,
+          );
+          return (fieldsList = 'id');
+        }
         const body = (await resp.json().catch(() => null)) as
           | { fields?: Array<{ api_name?: string }> }
           | null;
@@ -286,7 +293,8 @@ export class HistoricalImportService {
           .filter((n): n is string => !!n);
         // Zoho's Get Records `fields` param is capped at 50.
         return (fieldsList = names.length ? names.slice(0, 50).join(',') : 'id');
-      } catch {
+      } catch (err) {
+        this.logger.warn(`Zoho field metadata lookup for ${ordersModule} failed: ${err}`);
         return (fieldsList = 'id');
       }
     };

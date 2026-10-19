@@ -20,6 +20,10 @@ const ZOHO_DATA_CENTERS: Record<string, ZohoDataCenter> = {
 const DEFAULT_SCOPES = [
   'ZohoCRM.modules.accounts.READ',
   'ZohoCRM.modules.salesorders.READ',
+  // Required to read field metadata (/settings/fields) so the Get Records
+  // `fields` list can be resolved. Without it, field resolution falls back to
+  // `id` only and records come back with no usable data.
+  'ZohoCRM.settings.fields.READ',
 ];
 
 export interface ZohoAuthUrlParams {
