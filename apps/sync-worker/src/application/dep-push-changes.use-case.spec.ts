@@ -131,6 +131,28 @@ describe('DepPushChangesUseCase — returns un-assign devices from Apple', () =>
   });
 });
 
+describe('DepPushChangesUseCase — serial-less orders are never sent to DEP', () => {
+  const useCase = new DepPushChangesUseCase();
+
+  it('skips a serial-less order (no DEP items → isDep false) at the early gate', async () => {
+    // Duke creates orders before serials are assigned. No serials → no DEP
+    // items → isDep false → the early gate skips it; no Apple call, even on a
+    // field change. (Regression guard for the serial-number requirement.)
+    const order = { id: 8, accountId: 1, isDep: false, status: 'waiting', externalOrderId: 'ORD8', items: [] };
+    const orderChange = { id: 80, orderId: 8, changeType: 'updated' };
+    const h = harness({ order, orderChanges: [orderChange] });
+
+    const result = await useCase.execute(
+      h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, null,
+    );
+
+    expect(h.bulkEnrollDevices).not.toHaveBeenCalled();
+    expect(result.skipped).toBe(1);
+    expect(result.submitted).toBe(0);
+    expect(h.changeRepo.markOrderChangesSynced).toHaveBeenCalledWith([80]);
+  });
+});
+
 describe('DepPushChangesUseCase — ERP write-back result is recorded', () => {
   const useCase = new DepPushChangesUseCase();
   const order = { id: 7, accountId: 1, isDep: true, externalOrderId: 'SO-7', items: [] };

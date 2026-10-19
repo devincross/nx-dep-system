@@ -19,6 +19,9 @@ class ZohoOrderFieldMappings {
   @IsOptional() @IsString() externalOrderStatus?: string;
   @IsOptional() @IsString() isDep?: string;
   @IsOptional() @IsString() po?: string;
+  @IsOptional() @IsString() depOrderId?: string;
+  @IsOptional() @IsString() depOrderedAt?: string;
+  @IsOptional() @IsString() depShippedAt?: string;
 }
 
 class ZohoOrderItemFieldMappings {
