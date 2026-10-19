@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
 
@@ -32,6 +32,8 @@ const MAX_FIELDS = 50;
 
 @Injectable()
 export class ZohoService {
+  private readonly logger = new Logger(ZohoService.name);
+
   constructor(private readonly credentialsService: CredentialsService) {}
 
   /**
@@ -80,7 +82,14 @@ export class ZohoService {
         `${apiDomain}/crm/v3/settings/fields?module=${encodeURIComponent(module)}`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
       );
-      if (!resp.ok) return 'id';
+      if (!resp.ok) {
+        this.logger.warn(
+          `Could not read field metadata for ${module} (HTTP ${resp.status}) — ` +
+          `records will return only 'id'. The Zoho token likely lacks the ` +
+          `ZohoCRM.settings.fields.READ scope; reconnect with that scope added.`,
+        );
+        return 'id';
+      }
       const body = (await resp.json().catch(() => null)) as
         | { fields?: Array<{ api_name?: string }> }
         | null;
@@ -88,7 +97,8 @@ export class ZohoService {
         .map((f) => f.api_name)
         .filter((n): n is string => !!n);
       return names.length ? names.slice(0, MAX_FIELDS).join(',') : 'id';
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Field metadata lookup for ${module} failed: ${err}`);
       return 'id';
     }
   }
