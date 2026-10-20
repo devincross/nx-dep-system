@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, desc, inArray, isNull } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull, notInArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as https from 'https';
 import {
@@ -75,6 +75,63 @@ export class DepActionsService {
     }
 
     return { transactionId: txnId, response, ...this.submissionOutcome(response) };
+  }
+
+  /**
+   * Enroll every eligible order in one pass — orders with an active DEP device
+   * that aren't already enrolled (status not submitted/complete). Reuses
+   * enrollOrder per order so each goes through the same validated path. Bounded
+   * by `limit`; call repeatedly to work through a large backlog. One failing
+   * order never blocks the rest.
+   */
+  async enrollPending(
+    db: TenantDb,
+    limit = 50,
+  ): Promise<{ total: number; submitted: number; skipped: number; failed: number; errors: string[] }> {
+    const rows = await db
+      .select({ id: orders.id })
+      .from(orders)
+      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          notInArray(orders.status, ['submitted', 'complete']),
+          eq(orderItems.isDep, true),
+          isNull(orderItems.deletedAt),
+        ),
+      )
+      .groupBy(orders.id)
+      .orderBy(orders.id)
+      .limit(limit);
+
+    const result = { total: rows.length, submitted: 0, skipped: 0, failed: 0, errors: [] as string[] };
+
+    for (const { id } of rows) {
+      try {
+        const outcome = await this.enrollOrder(db, id);
+        if (outcome.accepted) {
+          result.submitted++;
+        } else {
+          result.failed++;
+          if (result.errors.length < 20) result.errors.push(`Order ${id}: ${outcome.errorMessage ?? 'rejected'}`);
+        }
+      } catch (err) {
+        // Ineligible (no DEP device / missing account DEP id) or a transport
+        // error — skip and keep going.
+        if (err instanceof BadRequestException) {
+          result.skipped++;
+        } else {
+          result.failed++;
+        }
+        if (result.errors.length < 20) {
+          result.errors.push(`Order ${id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    this.logger.log(
+      `enrollPending: ${result.submitted} submitted, ${result.skipped} skipped, ${result.failed} failed (of ${result.total})`,
+    );
+    return result;
   }
 
   async returnDevices(db: TenantDb, orderId: number, serialNumbers?: string[]) {

@@ -7,7 +7,7 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
-import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentTenant } from '../tenant/tenant.decorator.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
@@ -21,6 +21,15 @@ class DepEnrollDto {
   @IsOptional()
   @IsString()
   customerId?: string;
+}
+
+class DepEnrollPendingDto {
+  /** Max orders to enroll in this pass (default 50). Call again for more. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
 }
 
 class DepReturnDto {
@@ -70,6 +79,19 @@ export class DepActionsController {
     @Body() body: DepEnrollDto,
   ) {
     return this.depActionsService.enrollOrder(tenant.db, id, body.customerId);
+  }
+
+  /**
+   * Enroll all eligible, not-yet-enrolled orders in one pass (bounded by limit).
+   * Lets an admin clear the backlog on demand instead of waiting for the
+   * scheduler. Safe to repeat — already-enrolled orders are excluded.
+   */
+  @Post('dep/enroll-pending')
+  async enrollPending(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() body: DepEnrollPendingDto,
+  ) {
+    return this.depActionsService.enrollPending(tenant.db, body.limit ?? 50);
   }
 
   /**

@@ -30,6 +30,9 @@ const reconcileResults = ref<any[] | null>(null);
 const reconcileDialog = ref(false);
 const selectedOrders = ref<number[]>([]);
 
+// Bulk enroll-pending state
+const enrollingPending = ref(false);
+
 const orderStatuses: OrderStatus[] = ['waiting', 'pending', 'submitted', 'complete', 'error', 'changes'];
 
 // Pagination + search happen server-side (searches all records, not just
@@ -108,6 +111,21 @@ async function runDepAction() {
   } finally {
     depActionLoading.value = null;
     loadOrders();
+  }
+}
+
+async function runEnrollPending() {
+  enrollingPending.value = true;
+  try {
+    const { data: r } = await api.post('/orders/dep/enroll-pending', { limit: 50 });
+    notify.success(
+      `Enroll pending: ${r.submitted} submitted, ${r.skipped} skipped, ${r.failed} failed (of ${r.total}). Run again for more.`,
+    );
+    await loadOrders();
+  } catch (err: any) {
+    notify.errorFrom(err, 'Enroll pending failed. Please try again.');
+  } finally {
+    enrollingPending.value = false;
   }
 }
 
@@ -207,6 +225,15 @@ async function handleDelete() {
           @click="runReconcile"
         >
           Reconcile{{ selectedOrders.length > 0 ? ` (${selectedOrders.length})` : '' }}
+        </v-btn>
+        <v-btn
+          color="teal"
+          variant="outlined"
+          prepend-icon="mdi-plus-circle-multiple"
+          :loading="enrollingPending"
+          @click="runEnrollPending"
+        >
+          Enroll Pending
         </v-btn>
         <v-btn color="info" variant="outlined" to="/orders/historical-import" prepend-icon="mdi-database-import">
           Historical Import
