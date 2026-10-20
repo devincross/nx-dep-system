@@ -553,6 +553,9 @@ export class HistoricalImportService {
       ...fieldMappings?.order,
     };
     const itemsCfg = {
+      // Zoho typically stores serials in a top-level, delimited field on the
+      // order (no line-item subform); the loop below falls back to the record
+      // root. The field NAME is tenant-specific — set via field_mappings.
       sourceField: 'Product_Details',
       serialNumbers: 'Serial_Numbers',
       isDep: 'Is_DEP',
@@ -562,19 +565,23 @@ export class HistoricalImportService {
     return (raw: Record<string, unknown>): MappedOrder => {
       const items: MappedOrderItem[] = [];
       const rawItems = this.resolveFieldPath(raw, itemsCfg.sourceField);
-      if (Array.isArray(rawItems)) {
-        for (const rawItem of rawItems) {
-          const item = rawItem as Record<string, unknown>;
-          const serialField = this.resolveFieldPath(item, itemsCfg.serialNumbers);
-          if (!serialField) continue;
-          for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => normalizeSerial(s.trim())).filter(Boolean)) {
-            const depVal = this.resolveFieldPath(item, itemsCfg.isDep);
-            items.push({
-              serialNumber: sn,
-              isDep: this.parseTruthy(depVal),
-              depStatus: 'pending',
-            });
-          }
+      // Subform line items (array under sourceField), else the serial(s) live
+      // in a scalar field on the order record itself (e.g. Duke's top-level
+      // Apple_Serial_Number) — read from the appropriate container.
+      const serialContainers = Array.isArray(rawItems)
+        ? (rawItems as Record<string, unknown>[])
+        : [raw];
+      for (const container of serialContainers) {
+        const serialField = this.resolveFieldPath(container, itemsCfg.serialNumbers);
+        if (!serialField) continue;
+        for (const sn of String(serialField).split(/[,;\n\r]+/).map((s) => normalizeSerial(s.trim())).filter(Boolean)) {
+          const depVal = this.resolveFieldPath(container, itemsCfg.isDep);
+          items.push({
+            serialNumber: sn,
+            // No DEP flag on the record → a listed serial is DEP-eligible.
+            isDep: depVal == null ? true : this.parseTruthy(depVal),
+            depStatus: 'pending',
+          });
         }
       }
 
