@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
+import { zohoOrderFieldNames, pickFields, type ZohoFieldMappings } from '../zoho/zoho-fields.util.js';
 import { eq, and, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -239,6 +240,9 @@ export class HistoricalImportService {
       (connData['api_domain'] as string) || 'https://www.zohoapis.com';
     const ordersModule =
       (connData['orders_module'] as string) || 'Sales_Orders';
+    const neededFields = zohoOrderFieldNames(
+      connData['field_mappings'] as ZohoFieldMappings | undefined,
+    );
 
     let accessToken: string | null = null;
     let tokenExpiresAt = 0;
@@ -288,11 +292,14 @@ export class HistoricalImportService {
         const body = (await resp.json().catch(() => null)) as
           | { fields?: Array<{ api_name?: string }> }
           | null;
-        const names = (body?.fields ?? [])
-          .map((f) => f.api_name)
-          .filter((n): n is string => !!n);
-        // Zoho's Get Records `fields` param is capped at 50.
-        return (fieldsList = names.length ? names.slice(0, 50).join(',') : 'id');
+        const existing = new Set(
+          (body?.fields ?? [])
+            .map((f) => f.api_name)
+            .filter((n): n is string => !!n),
+        );
+        // Request the fields the mapper needs first so the 50-cap can't drop
+        // Status/the serial field/etc., then fill the rest.
+        return (fieldsList = pickFields(neededFields, existing));
       } catch (err) {
         this.logger.warn(`Zoho field metadata lookup for ${ordersModule} failed: ${err}`);
         return (fieldsList = 'id');
