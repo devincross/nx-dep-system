@@ -283,14 +283,18 @@ export class OrderRepository implements OrderRepositoryPort {
 
     const changedFields: ChangedFields = {};
 
-    // Check order-level field changes
-    if (existing.externalOrderStatus !== incoming.externalOrderStatus) {
+    // Check order-level field changes. Only compare when the incoming value is
+    // defined — the source not returning a field means "no info", not "cleared".
+    // Without this guard, a missing field is flagged changed every sync while
+    // update() skips the undefined value, so the DB never converges: an endless
+    // 'updated' change each cycle, which also re-triggers a DEP Override.
+    if (incoming.externalOrderStatus !== undefined && existing.externalOrderStatus !== incoming.externalOrderStatus) {
       changedFields['externalOrderStatus'] = {
         old: existing.externalOrderStatus,
         new: incoming.externalOrderStatus,
       };
     }
-    if (existing.po !== incoming.po) {
+    if (incoming.po !== undefined && existing.po !== incoming.po) {
       changedFields['po'] = { old: existing.po, new: incoming.po };
     }
     if (existing.depOrderId !== incoming.depOrderId && incoming.depOrderId !== undefined) {
