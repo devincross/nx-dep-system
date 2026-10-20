@@ -37,12 +37,16 @@ export class OrdersController {
     @Query('limit') limit?: string,
     @Query('search') search?: string,
     @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortDir') sortDir?: string,
   ) {
     return this.ordersService.findPage(tenant.db, {
       page: Math.max(1, parseInt(page ?? '1', 10) || 1),
       limit: Math.min(100, Math.max(1, parseInt(limit ?? '25', 10) || 25)),
       search: search || undefined,
       status: (status as OrderStatus) || undefined,
+      sortBy: sortBy || undefined,
+      sortDir: sortDir === 'asc' ? 'asc' : sortDir === 'desc' ? 'desc' : undefined,
     });
   }
 

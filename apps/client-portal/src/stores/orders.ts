@@ -15,6 +15,8 @@ export interface OrdersPageParams {
   limit: number;
   search?: string;
   status?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
 interface OrdersPageResponse {

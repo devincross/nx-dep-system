@@ -33,19 +33,24 @@ const selectedOrders = ref<number[]>([]);
 // Bulk enroll-pending state
 const enrollingPending = ref(false);
 
+// Server-side sort state
+const sortBy = ref<string | undefined>(undefined);
+const sortDir = ref<'asc' | 'desc' | undefined>(undefined);
+
 const orderStatuses: OrderStatus[] = ['waiting', 'pending', 'submitted', 'complete', 'error', 'changes'];
 
 // Pagination + search happen server-side (searches all records, not just
 // the loaded page), so column sorting is disabled — newest first.
 const headers = [
-  { title: 'ID', key: 'id', sortable: false },
-  { title: 'Order ID', key: 'orderId', sortable: false },
-  { title: 'Ext Order', key: 'externalOrderId', sortable: false },
-  { title: 'Status', key: 'status', sortable: false },
-  { title: 'PO', key: 'po', sortable: false },
-  { title: 'Source', key: 'source', sortable: false },
-  { title: 'DEP', key: 'depOrderId', sortable: false },
-  { title: 'Created', key: 'createdAt', sortable: false },
+  { title: 'ID', key: 'id', sortable: true },
+  { title: 'Order ID', key: 'orderId', sortable: true },
+  { title: 'Ext Order', key: 'externalOrderId', sortable: true },
+  { title: 'Status', key: 'status', sortable: true },
+  { title: 'PO', key: 'po', sortable: true },
+  { title: 'Source', key: 'source', sortable: true },
+  { title: 'Serials', key: 'serials', sortable: false },
+  { title: 'DEP', key: 'depOrderId', sortable: true },
+  { title: 'Created', key: 'createdAt', sortable: true },
   { title: 'Actions', key: 'actions', sortable: false, width: 280 },
 ];
 
@@ -55,6 +60,8 @@ async function loadOrders() {
     limit: itemsPerPage.value,
     search: search.value || undefined,
     status: statusFilter.value || undefined,
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
   });
 }
 
@@ -72,9 +79,16 @@ watch(statusFilter, () => {
   loadOrders();
 });
 
-function onTableOptions(options: { page: number; itemsPerPage: number }) {
+function onTableOptions(options: {
+  page: number;
+  itemsPerPage: number;
+  sortBy?: { key: string; order?: 'asc' | 'desc' }[];
+}) {
   page.value = options.page;
   itemsPerPage.value = options.itemsPerPage;
+  const s = options.sortBy?.[0];
+  sortBy.value = s?.key;
+  sortDir.value = s?.order ?? (s ? 'asc' : undefined);
   loadOrders();
 }
 
@@ -276,6 +290,9 @@ async function handleDelete() {
       <v-data-table-server :headers="headers" :items="ordersStore.orders" :items-length="ordersStore.total" :loading="ordersStore.loading" :page="page" :items-per-page="itemsPerPage" @update:options="onTableOptions" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
         <template v-slot:item.status="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">{{ item.status }}</v-chip>
+        </template>
+        <template v-slot:item.serials="{ item }">
+          <span>{{ item.items?.length ?? 0 }}</span>
         </template>
         <template v-slot:item.depOrderId="{ item }">
           <span v-if="item.depOrderId" class="text-caption">{{ item.depOrderId }}</span>
