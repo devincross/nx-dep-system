@@ -26,6 +26,6 @@ export class AccountsController {
    */
   @Post('sync')
   async syncAll(@CurrentTenant() tenant: TenantContext) {
-    return this.accountsService.syncAll(tenant.db);
+    return this.accountsService.syncAll(tenant);
   }
 }

@@ -64,7 +64,7 @@ describe('ZohoAdapter.fetchOrders', () => {
     expect(call.url).toContain('fields=id%2CProduct_Details');
     expect(call.url).not.toContain('criteria');
     expect((call.init?.headers as Record<string, string>)['If-Modified-Since']).toBe(
-      '2024-01-01T00:00:00.000Z',
+      '2024-01-01T00:00:00+00:00',
     );
     expect(result).toEqual({ data: [{ id: '1' }], hasMore: false, totalCount: 1 });
   });

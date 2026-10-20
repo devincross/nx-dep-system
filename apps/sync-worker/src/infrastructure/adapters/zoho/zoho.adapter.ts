@@ -172,9 +172,11 @@ export class ZohoAdapter implements DataSourcePort {
       'Content-Type': 'application/json',
     };
     // The Get Records API has no `criteria` param; filter by last-modified
-    // via the If-Modified-Since header instead.
+    // via the If-Modified-Since header instead. Zoho wants ISO 8601 with a
+    // numeric offset and no milliseconds (e.g. 2026-10-15T00:00:00+00:00);
+    // the default `.000Z` form is silently ignored and returns all records.
     if (lastModified) {
-      headers['If-Modified-Since'] = lastModified.toISOString();
+      headers['If-Modified-Since'] = lastModified.toISOString().replace(/\.\d{3}Z$/, '+00:00');
     }
 
     this.logger.debug(`Making ${method} request to: ${url}`);

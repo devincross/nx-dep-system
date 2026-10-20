@@ -74,9 +74,10 @@ describe('HistoricalImportService Zoho fetcher', () => {
     expect(call.url).toContain('page=1');
     // No ignored `criteria` param.
     expect(call.url).not.toContain('criteria');
-    // Date filter rides the header, not the query string.
+    // Date filter rides the header (ISO 8601 with offset, no millis — the
+    // `.000Z` form is silently ignored by Zoho), not the query string.
     expect((call.init?.headers as Record<string, string>)['If-Modified-Since']).toBe(
-      '2024-01-01T00:00:00.000Z',
+      '2024-01-01T00:00:00+00:00',
     );
     // hasMore reflects the presence of a cursor token.
     expect(result).toEqual({ data: [{ id: '1' }], hasMore: true });
