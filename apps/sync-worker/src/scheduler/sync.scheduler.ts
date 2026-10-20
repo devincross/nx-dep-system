@@ -258,6 +258,10 @@ export class SyncScheduler implements OnModuleInit {
 
       return { adapter: this.netsuiteAdapter, mapper };
     } else {
+      // Read field mappings first so the adapter can request exactly the fields
+      // the mapper consumes (avoids the 50-field cap dropping Status/etc).
+      const fieldMappings = connectionData['field_mappings'] as FieldMappingsConfig | undefined;
+
       const config: ZohoConfig = {
         clientId: connectionData['client_id'] as string,
         clientSecret: connectionData['client_secret'] as string,
@@ -265,12 +269,12 @@ export class SyncScheduler implements OnModuleInit {
         apiDomain: connectionData['api_domain'] as string || 'https://www.zohoapis.com',
         accountsModule: connectionData['accounts_module'] as string || 'Accounts',
         ordersModule: connectionData['orders_module'] as string || 'Sales_Orders',
+        fieldMappings,
       };
       this.zohoAdapter.configure(config);
 
       // Use dynamic mapper when tenant provides field_mappings config,
       // otherwise fall back to class-based mapper from registry
-      const fieldMappings = connectionData['field_mappings'] as FieldMappingsConfig | undefined;
       let mapper;
 
       if (fieldMappings) {

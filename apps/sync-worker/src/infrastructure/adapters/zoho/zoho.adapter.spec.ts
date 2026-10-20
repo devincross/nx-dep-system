@@ -110,4 +110,33 @@ describe('ZohoAdapter.fetchOrders', () => {
       newAdapter().fetchOrders({ lastModified: new Date('2024-01-01T00:00:00.000Z'), page: 1 }),
     ).rejects.toThrow(/400/);
   });
+
+  it('requests the fields the mapper needs even when they sit past the 50-field cap', async () => {
+    // Module with 60 junk fields, then Status/Account_Name/Product_Details — a
+    // blind first-50 slice would drop them; the needed-field request must not.
+    const metaFields = [
+      { api_name: 'id' },
+      ...Array.from({ length: 60 }, (_, i) => ({ api_name: `Junk_${i}` })),
+      { api_name: 'Status' },
+      { api_name: 'Account_Name' },
+      { api_name: 'Product_Details' },
+      { api_name: 'PO_Number' },
+    ];
+    const calls: string[] = [];
+    global.fetch = jest.fn(async (url: any) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes('oauth/v2/token')) return { ok: true, status: 200, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('settings/fields')) return { ok: true, status: 200, json: async () => ({ fields: metaFields }) } as any;
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: '1' }], info: {} }) } as any;
+    }) as any;
+
+    await newAdapter().fetchOrders({ lastModified: new Date('2024-01-01T00:00:00.000Z'), page: 1 });
+
+    const moduleUrl = calls.find((c) => c.includes('/crm/v3/Sales_Orders'))!;
+    for (const f of ['Status', 'Account_Name', 'Product_Details', 'PO_Number', 'id']) {
+      expect(moduleUrl).toContain(f);
+    }
+    expect(moduleUrl).not.toContain('Junk_');
+  });
 });
