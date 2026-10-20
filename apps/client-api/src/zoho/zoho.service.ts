@@ -1,6 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
+import {
+  zohoOrderFieldNames,
+  zohoAccountFieldNames,
+  pickFields,
+  type ZohoFieldMappings,
+} from './zoho-fields.util.js';
 
 /**
  * Zoho connection data interface matching ZohoConnectionDataDto.
@@ -76,7 +82,12 @@ export class ZohoService {
    * Resolve the module's field api_names. The Get Records API requires an
    * explicit `fields` list, so we read the module's field metadata first.
    */
-  private async resolveFields(apiDomain: string, module: string, token: string): Promise<string> {
+  private async resolveFields(
+    apiDomain: string,
+    module: string,
+    token: string,
+    needed: string[] = [],
+  ): Promise<string> {
     try {
       const resp = await fetch(
         `${apiDomain}/crm/v3/settings/fields?module=${encodeURIComponent(module)}`,
@@ -93,10 +104,13 @@ export class ZohoService {
       const body = (await resp.json().catch(() => null)) as
         | { fields?: Array<{ api_name?: string }> }
         | null;
-      const names = (body?.fields ?? [])
-        .map((f) => f.api_name)
-        .filter((n): n is string => !!n);
-      return names.length ? names.slice(0, MAX_FIELDS).join(',') : 'id';
+      const existing = new Set(
+        (body?.fields ?? [])
+          .map((f) => f.api_name)
+          .filter((n): n is string => !!n),
+      );
+      // Needed fields first (so the 50-cap can't drop them), then fill the rest.
+      return pickFields(needed, existing, MAX_FIELDS);
     } catch (err) {
       this.logger.warn(`Field metadata lookup for ${module} failed: ${err}`);
       return 'id';
@@ -110,12 +124,13 @@ export class ZohoService {
   private async readRecords(
     data: ZohoConnectionData,
     module: string,
-    query: { since?: string; per_page?: string }
+    query: { since?: string; per_page?: string },
+    needed: string[] = [],
   ): Promise<ZohoResponse> {
     try {
       const token = await this.getAccessToken(data);
       const apiDomain = data.api_domain || DEFAULT_API_DOMAIN;
-      const fields = await this.resolveFields(apiDomain, module, token);
+      const fields = await this.resolveFields(apiDomain, module, token, needed);
 
       const params = new URLSearchParams({ fields, per_page: query.per_page || '50' });
       const headers: Record<string, string> = { Authorization: `Zoho-oauthtoken ${token}` };
@@ -186,16 +201,33 @@ export class ZohoService {
     }
   }
 
+  /** The tenant's field_mappings from the raw connection data. */
+  private fieldMappings(credential: DecryptedCredential): ZohoFieldMappings | undefined {
+    return (credential.connectionData as Record<string, unknown>)['field_mappings'] as
+      | ZohoFieldMappings
+      | undefined;
+  }
+
   async getOrders(db: TenantDb, query: { since?: string; per_page?: string }): Promise<ZohoResponse> {
     const credential = await this.getZohoCredential(db);
     const data = credential.connectionData as unknown as ZohoConnectionData;
-    return this.readRecords(data, data.orders_module || DEFAULT_ORDERS_MODULE, query);
+    return this.readRecords(
+      data,
+      data.orders_module || DEFAULT_ORDERS_MODULE,
+      query,
+      zohoOrderFieldNames(this.fieldMappings(credential)),
+    );
   }
 
   async getAccounts(db: TenantDb, query: { since?: string; per_page?: string }): Promise<ZohoResponse> {
     const credential = await this.getZohoCredential(db);
     const data = credential.connectionData as unknown as ZohoConnectionData;
-    return this.readRecords(data, data.accounts_module || DEFAULT_ACCOUNTS_MODULE, query);
+    return this.readRecords(
+      data,
+      data.accounts_module || DEFAULT_ACCOUNTS_MODULE,
+      query,
+      zohoAccountFieldNames(this.fieldMappings(credential)),
+    );
   }
 
   /**
@@ -218,7 +250,7 @@ export class ZohoService {
     const nameField = cfg.name || 'Account_Name';
     const depField = cfg.depAccountId || 'DEP_Account_ID';
 
-    const records = await this.readAllRecords(data, module);
+    const records = await this.readAllRecords(data, module, zohoAccountFieldNames(this.fieldMappings(credential)));
     return records
       .map((r) => {
         const dep = this.fieldPath(r, depField);
@@ -248,10 +280,11 @@ export class ZohoService {
   private async readAllRecords(
     data: ZohoConnectionData,
     module: string,
+    needed: string[] = [],
   ): Promise<Record<string, unknown>[]> {
     const token = await this.getAccessToken(data);
     const apiDomain = data.api_domain || DEFAULT_API_DOMAIN;
-    const fields = await this.resolveFields(apiDomain, module, token);
+    const fields = await this.resolveFields(apiDomain, module, token, needed);
 
     const all: Record<string, unknown>[] = [];
     let pageToken: string | undefined;
