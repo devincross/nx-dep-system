@@ -57,22 +57,20 @@ export class ZohoBaseMapper implements MapperPort {
    */
   protected mapOrderItems(raw: RawOrderData): OrderItemEntity[] {
     const items: OrderItemEntity[] = [];
-    
-    // Zoho uses Product_Details for line items
-    const rawItems = (raw['Product_Details'] ?? raw['Ordered_Items'] ?? []) as unknown[];
-    
-    if (!Array.isArray(rawItems)) {
-      return items;
-    }
 
-    for (const rawItem of rawItems) {
-      const item = rawItem as Record<string, unknown>;
-      const serialNumbers = this.extractSerialNumbers(item);
-      
-      for (const serialNumber of serialNumbers) {
+    // Subform line items if present (Product_Details), otherwise the order
+    // record itself — Zoho integrations store serials in a top-level, delimited
+    // field (e.g. Apple_Serial_Number), not a line-item subform.
+    const rawItems = raw['Product_Details'] ?? raw['Ordered_Items'];
+    const containers = Array.isArray(rawItems)
+      ? (rawItems as Record<string, unknown>[])
+      : [raw as Record<string, unknown>];
+
+    for (const container of containers) {
+      for (const serialNumber of this.extractSerialNumbers(container)) {
         items.push({
           serialNumber,
-          isDep: this.determineItemIsDep(item),
+          isDep: this.determineItemIsDep(container),
           depStatus: 'pending',
         });
       }
@@ -122,16 +120,21 @@ export class ZohoBaseMapper implements MapperPort {
    * Determine if an item is DEP eligible
    */
   protected determineItemIsDep(item: Record<string, unknown>): boolean {
-    const depField = item['Is_DEP'] ?? item['DEP_Eligible'] ?? false;
-    
+    const depField = item['Is_DEP'] ?? item['DEP_Eligible'];
+
+    // No DEP flag on the record → a listed serial is DEP-eligible by default.
+    if (depField == null) {
+      return true;
+    }
+
     if (typeof depField === 'boolean') {
       return depField;
     }
-    
+
     if (typeof depField === 'string') {
       return depField.toLowerCase() === 'true' || depField === '1' || depField.toLowerCase() === 'yes';
     }
-    
+
     return Boolean(depField);
   }
 }

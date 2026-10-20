@@ -61,6 +61,11 @@ const DEFAULT_CONFIG: Required<FieldMappingsConfig> = {
     depShippedAt: 'DEP_Shipped_At',
   },
   orderItems: {
+    // Zoho integrations typically store serials in a top-level, delimited field
+    // on the order (no line-item subform); mapOrderItems falls back to the
+    // record root when sourceField isn't an array. The field NAME is
+    // tenant-specific — set orderItems.serialNumbers in the tenant's
+    // field_mappings (e.g. Duke uses 'Apple_Serial_Number').
     sourceField: 'Product_Details',
     serialNumbers: 'Serial_Numbers',
     isDep: 'Is_DEP',
@@ -131,26 +136,41 @@ export class DynamicZohoMapper implements MapperPort {
   private mapOrderItems(raw: RawOrderData): OrderItemEntity[] {
     const rawItems = resolveFieldPath(raw, this.itemsCfg.sourceField);
 
-    if (!Array.isArray(rawItems)) {
-      return [];
-    }
-
-    const items: OrderItemEntity[] = [];
-
-    for (const rawItem of rawItems) {
-      const item = rawItem as Record<string, unknown>;
-      const serialNumbers = this.extractSerialNumbers(item);
-
-      for (const serialNumber of serialNumbers) {
-        items.push({
-          serialNumber,
-          isDep: this.parseTruthy(resolveFieldPath(item, this.itemsCfg.isDep)),
-          depStatus: 'pending',
-        });
+    // Subform line items: an array of rows under sourceField.
+    if (Array.isArray(rawItems)) {
+      const items: OrderItemEntity[] = [];
+      for (const rawItem of rawItems) {
+        const item = rawItem as Record<string, unknown>;
+        for (const serialNumber of this.extractSerialNumbers(item)) {
+          items.push({
+            serialNumber,
+            isDep: this.resolveItemIsDep(item),
+            depStatus: 'pending',
+          });
+        }
       }
+      return items;
     }
 
-    return items;
+    // No subform: the serial(s) live in a scalar field on the order record
+    // itself (e.g. Duke's top-level Apple_Serial_Number). Read them from the
+    // record root — one order, one (or a few delimited) serial(s).
+    return this.extractSerialNumbers(raw).map((serialNumber) => ({
+      serialNumber,
+      isDep: this.resolveItemIsDep(raw),
+      depStatus: 'pending',
+    }));
+  }
+
+  /**
+   * A serial that's present is DEP-eligible by default. Respect an explicit
+   * DEP flag when the record actually carries one; otherwise default to true —
+   * Zoho integrations generally have no per-item DEP field, and a listed Apple
+   * serial is a device to enroll.
+   */
+  private resolveItemIsDep(container: Record<string, unknown>): boolean {
+    const val = resolveFieldPath(container, this.itemsCfg.isDep);
+    return val == null ? true : this.parseTruthy(val);
   }
 
   private extractSerialNumbers(item: Record<string, unknown>): string[] {

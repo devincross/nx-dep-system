@@ -21,10 +21,9 @@ const sampleOrder: RawOrderData = {
   Is_DEP: true,
   DEP_Eligible: true,
   PO_Number: 'PO-5555',
-  Product_Details: [
-    { Serial_Numbers: 'SN001,SN002', Serials: 'SN001,SN002', Is_DEP: true, DEP_Eligible: true },
-    { Serial_Numbers: 'SN003', Serials: 'SN003', Is_DEP: false, DEP_Eligible: false },
-  ],
+  // Zoho stores serials in a top-level, delimited field (no line-item subform).
+  // Field name is the generic default here; real tenants configure their own.
+  Serial_Numbers: 'SN001,SN002',
 };
 
 // ---------- parity ----------
@@ -165,26 +164,57 @@ describe('DynamicZohoMapper edge cases', () => {
     expect(result.items).toEqual([]);
   });
 
-  it('handles serial numbers with mixed delimiters', () => {
+  it('reads delimited serials from a top-level serial field (no subform)', () => {
+    // The default Zoho shape: no subform, serials in one delimited field.
     const raw: RawOrderData = {
       id: '1',
       Account_Name: { id: 'A1' },
-      Product_Details: [
-        { Serial_Numbers: 'S1,S2;S3\nS4\r\nS5' },
-      ],
+      Is_DEP: true,
+      Serial_Numbers: 'S1,S2;S3\nS4\r\nS5',
     };
     const items = mapper.mapOrder(raw).items;
     expect(items.map((i) => i.serialNumber)).toEqual(['1', '2', '3', '4', '5']);
+    expect(items.every((i) => i.isDep)).toBe(true);
+  });
+
+  it('reads the top-level serial field NAMED IN CONFIG (e.g. Duke Apple_Serial_Number)', () => {
+    // The field name is tenant-specific config, never hardcoded.
+    const dukeMapper = new DynamicZohoMapper({
+      orderItems: { serialNumbers: 'Apple_Serial_Number' },
+    });
+    const raw: RawOrderData = {
+      id: '1',
+      Account_Name: { id: 'A1' },
+      Is_DEP: true,
+      Apple_Serial_Number: 'AB01,AB02',
+    };
+    expect(dukeMapper.mapOrder(raw).items.map((i) => i.serialNumber)).toEqual(['AB01', 'AB02']);
   });
 
   it('skips empty serial strings after splitting', () => {
     const raw: RawOrderData = {
       id: '1',
       Account_Name: { id: 'A1' },
-      Product_Details: [
-        { Serial_Numbers: ',,,  , ' },
-      ],
+      Apple_Serial_Number: ',,,  , ',
     };
     expect(mapper.mapOrder(raw).items).toEqual([]);
+  });
+
+  it('still reads a configured line-item subform when one is provided', () => {
+    // Subform support is retained for any tenant that configures it.
+    const subformMapper = new DynamicZohoMapper({
+      orderItems: { sourceField: 'line_items', serialNumbers: 'sn', isDep: 'dep' },
+    });
+    const raw: RawOrderData = {
+      id: '1',
+      Account_Name: { id: 'A1' },
+      line_items: [
+        { sn: 'AA01,AA02', dep: true },
+        { sn: 'AA03', dep: false },
+      ],
+    };
+    const items = subformMapper.mapOrder(raw).items;
+    expect(items.map((i) => i.serialNumber)).toEqual(['AA01', 'AA02', 'AA03']);
+    expect(items.map((i) => i.isDep)).toEqual([true, true, false]);
   });
 });
