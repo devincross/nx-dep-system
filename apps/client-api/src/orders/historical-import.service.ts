@@ -705,6 +705,14 @@ export class HistoricalImportService {
             createdAt: now,
             updatedAt: now,
           });
+        } else {
+          // Correct DEP eligibility on an item we already have (e.g. imported
+          // before a serial counted as DEP-eligible). dep_status is owned by
+          // the DEP pipeline, so leave it untouched.
+          await db
+            .update(orderItems)
+            .set({ isDep: item.isDep, updatedAt: now })
+            .where(eq(orderItems.id, existingItem[0].id));
         }
       }
 
