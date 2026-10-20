@@ -146,12 +146,20 @@ export class OrderRepository implements OrderRepositoryPort {
     };
   }
 
-  async update(id: number, order: Partial<OrderEntity>): Promise<PersistedOrderEntity> {
+  async update(id: number, order: Partial<OrderEntity>, accountId?: number): Promise<PersistedOrderEntity> {
     const db = this.ensureDb();
     const now = new Date();
 
     const updateData: Record<string, unknown> = { updatedAt: now };
-    
+
+    // Re-link the account on every sync so a corrected/added account fixes
+    // orders that were first imported against a placeholder.
+    if (accountId !== undefined) {
+      updateData['accountId'] = accountId;
+    }
+    if (order.externalAccountId !== undefined) {
+      updateData['externalAccountId'] = order.externalAccountId;
+    }
     if (order.externalOrderStatus !== undefined) {
       updateData['externalOrderStatus'] = order.externalOrderStatus;
     }
@@ -246,7 +254,10 @@ export class OrderRepository implements OrderRepositoryPort {
       // Sync items (add new, remove missing, update existing)
       await this.syncOrderItems(existing.id, existing.items, order.items);
 
-      const updated = await this.update(existing.id, order);
+      // Re-resolve the account link too — orders created before the source
+      // returned an account (e.g. a mapping gap) were linked to a placeholder
+      // and must be corrected on re-sync.
+      const updated = await this.update(existing.id, order, accountId);
       return { entity: updated, created: false };
     } else {
       const created = await this.create(order, accountId);

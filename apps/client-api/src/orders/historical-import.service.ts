@@ -666,10 +666,14 @@ export class HistoricalImportService {
     const now = new Date();
 
     if (existing.length > 0) {
-      // Update existing — NO change tracking
+      // Update existing — NO change tracking. Re-link the account too, so
+      // orders first imported against a placeholder (e.g. before the account
+      // resolved) get corrected on re-import.
       await db
         .update(orders)
         .set({
+          accountId,
+          externalAccountId: order.externalAccountId,
           externalOrderStatus: order.externalOrderStatus,
           po: order.po,
           depOrderId: order.depOrderId,
