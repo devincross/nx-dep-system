@@ -73,6 +73,49 @@ const DEFAULT_CONFIG: Required<FieldMappingsConfig> = {
   truthyValues: DEFAULT_TRUTHY_VALUES,
 };
 
+const rootField = (p?: string): string => (p ? p.split('.')[0] : '');
+
+/**
+ * Top-level Zoho field api_names a Zoho ORDER mapper reads, for the Get Records
+ * `fields` param. Dot-paths (e.g. Account_Name.id) are reduced to the root
+ * field. Lets the fetch request exactly what the mapper needs so the 50-field
+ * cap can't silently drop Status / Account_Name / the serial field / etc.
+ */
+export function zohoOrderFieldNames(config?: FieldMappingsConfig): string[] {
+  const order = { ...DEFAULT_CONFIG.order, ...config?.order };
+  const items = { ...DEFAULT_CONFIG.orderItems, ...config?.orderItems };
+  return [
+    ...new Set(
+      [
+        rootField(order.externalOrderId),
+        rootField(order.externalAccountId),
+        rootField(order.externalOrderStatus),
+        rootField(order.isDep),
+        rootField(order.po),
+        rootField(order.depOrderId),
+        rootField(order.depOrderedAt),
+        rootField(order.depShippedAt),
+        rootField(items.sourceField),
+        rootField(items.serialNumbers),
+      ].filter(Boolean),
+    ),
+  ];
+}
+
+/** Top-level Zoho field api_names a Zoho ACCOUNT mapper reads. */
+export function zohoAccountFieldNames(config?: FieldMappingsConfig): string[] {
+  const account = { ...DEFAULT_CONFIG.account, ...config?.account };
+  return [
+    ...new Set(
+      [
+        rootField(account.externalAccountId),
+        rootField(account.name),
+        rootField(account.depAccountId),
+      ].filter(Boolean),
+    ),
+  ];
+}
+
 /**
  * Config-driven Zoho mapper.
  *

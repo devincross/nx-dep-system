@@ -6,6 +6,11 @@ import {
   RawAccountData,
   RawOrderData,
 } from '../../../domain/ports/data-source.port.js';
+import {
+  FieldMappingsConfig,
+  zohoOrderFieldNames,
+  zohoAccountFieldNames,
+} from './mappers/dynamic.mapper.js';
 
 // Zoho's Get Records `fields` param is capped; keep the list bounded.
 const MAX_FIELDS = 50;
@@ -17,6 +22,9 @@ export interface ZohoConfig {
   apiDomain: string; // e.g., https://www.zohoapis.com
   accountsModule: string; // e.g., 'Accounts'
   ordersModule: string; // e.g., 'Sales_Orders'
+  // The tenant's field mappings, so the fetch can request exactly the fields
+  // the mapper consumes (instead of the first 50 the module happens to return).
+  fieldMappings?: FieldMappingsConfig;
 }
 
 @Injectable()
@@ -215,11 +223,28 @@ export class ZohoAdapter implements DataSourcePort {
         const body = (await resp.json().catch(() => null)) as
           | { fields?: Array<{ api_name?: string }> }
           | null;
-        const names = (body?.fields ?? [])
-          .map((f) => f.api_name)
-          .filter((n): n is string => !!n);
-        // Zoho's Get Records `fields` param is capped at 50.
-        if (names.length) result = names.slice(0, MAX_FIELDS).join(',');
+        const existing = new Set(
+          (body?.fields ?? [])
+            .map((f) => f.api_name)
+            .filter((n): n is string => !!n),
+        );
+        // Request exactly the fields the mapper consumes (those that exist on
+        // the module) so the 50-field cap can't drop Status/Account_Name/the
+        // serial field/etc. Fall back to the first 50 fields when we have no
+        // needed-list (unknown module).
+        const needed =
+          module === this.config!.ordersModule
+            ? zohoOrderFieldNames(this.config!.fieldMappings)
+            : module === this.config!.accountsModule
+              ? zohoAccountFieldNames(this.config!.fieldMappings)
+              : [];
+        const wanted = needed.filter((n) => existing.has(n));
+        if (wanted.length) {
+          if (!wanted.includes('id') && existing.has('id')) wanted.unshift('id');
+          result = wanted.slice(0, MAX_FIELDS).join(',');
+        } else if (existing.size) {
+          result = [...existing].slice(0, MAX_FIELDS).join(',');
+        }
       } else {
         this.logger.warn(
           `Could not read field metadata for ${module} (HTTP ${resp.status}) — ` +
