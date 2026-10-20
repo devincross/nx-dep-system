@@ -214,6 +214,31 @@ describe('OrderRepository - Change Detection', () => {
       findSpy.mockRestore();
     });
 
+    it('does NOT record a change when the source omits a field (incoming undefined)', async () => {
+      // Regression: a missing Status/PO must not read as "changed", or the
+      // sync records an 'updated' change every cycle (update() skips undefined,
+      // so it never converges) and re-triggers a DEP Override each time.
+      const existingOrder = createMockOrder({ externalOrderStatus: 'pending', po: 'PO-001', items: [] });
+      const incomingOrder = createIncomingOrder({
+        externalOrderStatus: undefined,
+        po: undefined,
+        items: [],
+      });
+
+      const findSpy = jest.spyOn(repository, 'findByExternalId')
+        .mockResolvedValueOnce(existingOrder)
+        .mockResolvedValueOnce(existingOrder);
+
+      const mockDb = createMockDb();
+      repository.setDb(mockDb);
+
+      await repository.upsert(incomingOrder, 100);
+
+      expect(mockChangeRepository.recordOrderChange).not.toHaveBeenCalled();
+
+      findSpy.mockRestore();
+    });
+
     it('should record PO changes', async () => {
       const existingOrder = createMockOrder({
         po: 'PO-001',
