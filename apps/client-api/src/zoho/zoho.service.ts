@@ -120,7 +120,9 @@ export class ZohoService {
       const params = new URLSearchParams({ fields, per_page: query.per_page || '50' });
       const headers: Record<string, string> = { Authorization: `Zoho-oauthtoken ${token}` };
       if (query.since) {
-        headers['If-Modified-Since'] = new Date(query.since).toISOString();
+        // Zoho wants ISO 8601 with a numeric offset and no milliseconds; the
+        // default `.000Z` form is silently ignored (returns all records).
+        headers['If-Modified-Since'] = new Date(query.since).toISOString().replace(/\.\d{3}Z$/, '+00:00');
       }
 
       const resp = await fetch(`${apiDomain}/crm/v3/${module}?${params.toString()}`, { headers });
@@ -194,5 +196,86 @@ export class ZohoService {
     const credential = await this.getZohoCredential(db);
     const data = credential.connectionData as unknown as ZohoConnectionData;
     return this.readRecords(data, data.accounts_module || DEFAULT_ACCOUNTS_MODULE, query);
+  }
+
+  /**
+   * Fetch and map every account for an account sync. Cursor-paginates the full
+   * accounts module and maps each record with the tenant's field_mappings.account
+   * config (defaults: id / Account_Name / DEP_Account_ID).
+   */
+  async getMappedAccounts(
+    db: TenantDb,
+  ): Promise<Array<{ externalAccountId: string; name: string; depAccountId?: string }>> {
+    const credential = await this.getZohoCredential(db);
+    const data = credential.connectionData as unknown as ZohoConnectionData;
+    const module = data.accounts_module || DEFAULT_ACCOUNTS_MODULE;
+
+    const cfg =
+      ((credential.connectionData as Record<string, unknown>)['field_mappings'] as
+        | { account?: Record<string, string> }
+        | undefined)?.account ?? {};
+    const idField = cfg.externalAccountId || 'id';
+    const nameField = cfg.name || 'Account_Name';
+    const depField = cfg.depAccountId || 'DEP_Account_ID';
+
+    const records = await this.readAllRecords(data, module);
+    return records
+      .map((r) => {
+        const dep = this.fieldPath(r, depField);
+        return {
+          externalAccountId: String(this.fieldPath(r, idField) ?? ''),
+          name: String(this.fieldPath(r, nameField) ?? ''),
+          depAccountId: dep != null ? String(dep) : undefined,
+        };
+      })
+      .filter((a) => a.externalAccountId);
+  }
+
+  /** Resolve a (possibly dot-notated) field path on a record. */
+  private fieldPath(obj: Record<string, unknown>, path: string): unknown {
+    return path
+      .split('.')
+      .reduce<unknown>(
+        (cur, part) =>
+          cur != null && typeof cur === 'object'
+            ? (cur as Record<string, unknown>)[part]
+            : undefined,
+        obj,
+      );
+  }
+
+  /** Read every record in a module via cursor pagination (page_token). */
+  private async readAllRecords(
+    data: ZohoConnectionData,
+    module: string,
+  ): Promise<Record<string, unknown>[]> {
+    const token = await this.getAccessToken(data);
+    const apiDomain = data.api_domain || DEFAULT_API_DOMAIN;
+    const fields = await this.resolveFields(apiDomain, module, token);
+
+    const all: Record<string, unknown>[] = [];
+    let pageToken: string | undefined;
+    let pages = 0;
+    do {
+      const params = new URLSearchParams({ fields, per_page: '200' });
+      if (pageToken) params.set('page_token', pageToken);
+      const resp = await fetch(`${apiDomain}/crm/v3/${module}?${params.toString()}`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      });
+      if (resp.status === 204) break;
+      if (!resp.ok) {
+        const b = (await resp.json().catch(() => null)) as { message?: string; code?: string } | null;
+        throw new Error(b?.message || b?.code || `Zoho ${module} fetch failed (HTTP ${resp.status})`);
+      }
+      const body = (await resp.json()) as {
+        data?: Record<string, unknown>[];
+        info?: { next_page_token?: string };
+      };
+      all.push(...(body.data ?? []));
+      pageToken = body.info?.next_page_token;
+      if (++pages > 500) break;
+    } while (pageToken);
+
+    return all;
   }
 }

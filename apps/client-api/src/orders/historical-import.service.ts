@@ -321,7 +321,9 @@ export class HistoricalImportService {
         {
           headers: {
             Authorization: `Zoho-oauthtoken ${token}`,
-            'If-Modified-Since': startDate.toISOString(),
+            // Zoho wants ISO 8601 with a numeric offset and no milliseconds;
+            // the default `.000Z` form is silently ignored (returns all).
+            'If-Modified-Since': startDate.toISOString().replace(/\.\d{3}Z$/, '+00:00'),
           },
         },
       );
