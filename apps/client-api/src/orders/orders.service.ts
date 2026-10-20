@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
-import { eq, isNull, and, or, inArray, like, desc, lt, sql, type SQL } from 'drizzle-orm';
+import { eq, isNull, and, or, inArray, like, asc, desc, lt, sql, type SQL } from 'drizzle-orm';
 import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, attentionDismissals, depTransactions, accounts, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
@@ -65,6 +65,8 @@ export interface OrdersPageOptions {
   limit: number;
   search?: string;
   status?: OrderStatus;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
 export interface OrdersPage {
@@ -157,11 +159,28 @@ export class OrdersService {
       .from(orders)
       .where(where);
 
+    // Whitelist of sortable columns (keys match the client's header keys).
+    const sortColumns = {
+      id: orders.id,
+      orderId: orders.orderId,
+      externalOrderId: orders.externalOrderId,
+      status: orders.status,
+      po: orders.po,
+      source: orders.source,
+      depOrderId: orders.depOrderId,
+      createdAt: orders.createdAt,
+    } as const;
+    const sortKey = (
+      opts.sortBy && opts.sortBy in sortColumns ? opts.sortBy : 'id'
+    ) as keyof typeof sortColumns;
+    const sortCol = sortColumns[sortKey];
+    const orderByClause = opts.sortDir === 'asc' ? asc(sortCol) : desc(sortCol);
+
     const pageRows = await db
       .select()
       .from(orders)
       .where(where)
-      .orderBy(desc(orders.id))
+      .orderBy(orderByClause)
       .limit(opts.limit)
       .offset((opts.page - 1) * opts.limit);
 
