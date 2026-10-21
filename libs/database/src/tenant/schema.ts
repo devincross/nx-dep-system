@@ -355,6 +355,101 @@ export const depTransactionsRelations = relations(depTransactions, ({ one }) => 
   }),
 }));
 
+// Reconciliation run status enum
+export const reconciliationRunStatusEnum = [
+  'pending',
+  'running',
+  'paused',
+  'complete',
+  'error',
+  'canceled',
+] as const;
+export type ReconciliationRunStatus = (typeof reconciliationRunStatusEnum)[number];
+
+// Reconciliation runs - a long-lived, restartable job that walks every order,
+// corrects our copy against Zoho, and compares against Apple DEP. One row per
+// run; the sync-worker advances cursorOrderId as a durable checkpoint so a
+// crash resumes from where it left off.
+export const reconciliationRuns = mysqlTable(
+  'reconciliation_runs',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    runId: char('run_id', { length: 36 }).notNull(), // public id returned to the portal
+    status: mysqlEnum('status', reconciliationRunStatusEnum).default('pending').notNull(),
+    scope: text('scope'), // JSON scope params
+    cursorOrderId: bigint('cursor_order_id', { mode: 'number', unsigned: true })
+      .default(0)
+      .notNull(), // highest orders.id fully committed (the checkpoint)
+    totalOrders: int('total_orders'),
+    processedOrders: int('processed_orders').default(0).notNull(),
+    zohoCorrectedCount: int('zoho_corrected_count').default(0).notNull(),
+    zohoMismatchCount: int('zoho_mismatch_count').default(0).notNull(),
+    appleMatchCount: int('apple_match_count').default(0).notNull(),
+    missingFromAppleCount: int('missing_from_apple_count').default(0).notNull(),
+    extraInAppleCount: int('extra_in_apple_count').default(0).notNull(),
+    criticalCount: int('critical_count').default(0).notNull(),
+    errorOrderCount: int('error_order_count').default(0).notNull(),
+    zohoIndexedAt: timestamp('zoho_indexed_at'), // Zoho crawl done; resume reuses index
+    error: text('error'),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('reconciliation_runs_run_id_unique').on(table.runId),
+    index('reconciliation_runs_status_idx').on(table.status),
+  ]
+);
+
+// Reconciliation recommended action enum
+export const reconciliationActionEnum = [
+  'none',
+  'ov_restore',
+  'investigate',
+  'not_in_apple',
+  'not_in_zoho',
+] as const;
+export type ReconciliationAction = (typeof reconciliationActionEnum)[number];
+
+// Reconciliation severity enum
+export const reconciliationSeverityEnum = ['ok', 'warn', 'critical'] as const;
+export type ReconciliationSeverity = (typeof reconciliationSeverityEnum)[number];
+
+// Reconciliation findings - the per-run report; one row per order per run.
+// Unique (run_id, order_id) makes the worker idempotent on replay.
+export const reconciliationFindings = mysqlTable(
+  'reconciliation_findings',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    runId: char('run_id', { length: 36 }).notNull(),
+    orderId: bigint('order_id', { mode: 'number', unsigned: true }).notNull(),
+    orderNumber: varchar('order_number', { length: 255 }),
+    externalOrderId: varchar('external_order_id', { length: 255 }),
+    ourDevices: text('our_devices'), // JSON sorted serials
+    zohoDevices: text('zoho_devices'), // JSON, null when order absent from Zoho
+    appleDevices: text('apple_devices'), // JSON, null when order absent from Apple
+    zohoMatch: boolean('zoho_match'),
+    appleMatch: boolean('apple_match'),
+    zohoAdded: text('zoho_added'), // JSON serials added to our DB from Zoho
+    zohoRemoved: text('zoho_removed'), // JSON serials removed from our DB to match Zoho
+    zohoCorrectionApplied: boolean('zoho_correction_applied').default(false).notNull(),
+    missingFromApple: text('missing_from_apple'), // JSON — the wrongly-removed devices
+    extraInApple: text('extra_in_apple'), // JSON
+    recommendedAction: mysqlEnum('recommended_action', reconciliationActionEnum)
+      .default('none')
+      .notNull(),
+    severity: mysqlEnum('severity', reconciliationSeverityEnum).default('ok').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('reconciliation_findings_run_order_unique').on(table.runId, table.orderId),
+    index('reconciliation_findings_run_idx').on(table.runId),
+    index('reconciliation_findings_severity_idx').on(table.runId, table.severity),
+  ]
+);
+
 // Types
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -378,4 +473,8 @@ export type OrderItemChange = typeof orderItemChanges.$inferSelect;
 export type NewOrderItemChange = typeof orderItemChanges.$inferInsert;
 export type DepTransaction = typeof depTransactions.$inferSelect;
 export type NewDepTransaction = typeof depTransactions.$inferInsert;
+export type ReconciliationRun = typeof reconciliationRuns.$inferSelect;
+export type NewReconciliationRun = typeof reconciliationRuns.$inferInsert;
+export type ReconciliationFinding = typeof reconciliationFindings.$inferSelect;
+export type NewReconciliationFinding = typeof reconciliationFindings.$inferInsert;
 

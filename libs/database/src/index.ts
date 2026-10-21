@@ -59,6 +59,11 @@ export {
   depTransactionStatusEnum,
   depOrderTypeEnum,
   depTransactionsRelations,
+  reconciliationRuns,
+  reconciliationRunStatusEnum,
+  reconciliationFindings,
+  reconciliationActionEnum,
+  reconciliationSeverityEnum,
 } from './tenant/schema.js';
 
 export type {
@@ -96,6 +101,13 @@ export type {
   NewDepTransaction,
   DepTransactionStatus,
   DepOrderType,
+  ReconciliationRun,
+  NewReconciliationRun,
+  ReconciliationRunStatus,
+  ReconciliationFinding,
+  NewReconciliationFinding,
+  ReconciliationAction,
+  ReconciliationSeverity,
 } from './tenant/schema.js';
 
 export {
