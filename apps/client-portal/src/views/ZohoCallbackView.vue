@@ -35,6 +35,26 @@ onMounted(async () => {
   };
 
   try {
+    const credentialId = oauthParams.credential_id;
+
+    if (credentialId) {
+      // Existing credential → re-authorize in place on the server so its
+      // field mappings and other settings are preserved (no form round-trip,
+      // no way to lose settings).
+      await api.post(`/zoho/credentials/${credentialId}/reconnect`, {
+        code,
+        redirect_uri: oauthParams.redirect_uri,
+        accounts_server: accountsServer || undefined,
+        data_center: oauthParams.data_center,
+      });
+      sessionStorage.removeItem('zoho_oauth_params');
+      status.value = 'success';
+      router.push(`/credentials/${credentialId}/edit?reconnected=1`);
+      return;
+    }
+
+    // New credential → exchange here and carry the tokens AND the entered
+    // Client ID/Secret back to the create form so they aren't lost.
     const response = await api.post<{ refresh_token: string; api_domain: string }>('/zoho/exchange-token', {
       code,
       client_id: oauthParams.client_id,
@@ -44,22 +64,17 @@ onMounted(async () => {
       data_center: oauthParams.data_center,
     });
 
-    // Store the tokens for the credential form to pick up
     sessionStorage.setItem('zoho_oauth_result', JSON.stringify({
       refresh_token: response.data.refresh_token,
       api_domain: response.data.api_domain,
+      client_id: oauthParams.client_id,
+      client_secret: oauthParams.client_secret,
+      data_center: oauthParams.data_center,
     }));
 
     sessionStorage.removeItem('zoho_oauth_params');
     status.value = 'success';
-
-    // Redirect back to credential form
-    const credentialId = oauthParams.credential_id;
-    if (credentialId) {
-      router.push(`/credentials/${credentialId}/edit`);
-    } else {
-      router.push('/credentials/create?type=zoho');
-    }
+    router.push('/credentials/create?type=zoho');
   } catch (err: any) {
     status.value = 'error';
     errorMessage.value = err.response?.data?.message || err.message || 'Unable to complete the Zoho connection. Please try again from the credentials page.';
