@@ -190,7 +190,7 @@ export class DepActionsService {
     const now = this.formatDate(new Date());
 
     const request = this.buildBulkEnrollRequest(cred, txnId, [
-      this.buildOverrideEntry(order, depItems, resolvedCustomerId, now),
+      this.buildRemediationEntry(order, depItems, resolvedCustomerId, now, 'OV'),
     ]);
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
@@ -198,22 +198,29 @@ export class DepActionsService {
     return { transactionId: txnId, response, ...this.submissionOutcome(response) };
   }
 
-  /** Build a single OV order entry for a bulk-enroll request. Shared by the
-   * single-order override and the batched remediation path. */
-  private buildOverrideEntry(
+  /**
+   * Build a single order entry for a bulk-enroll request. action 'OV' overrides
+   * an order Apple still has (delivery 'SELF'); 'OR' enrolls an order Apple no
+   * longer has (delivery 'DEL_…'). Apple rejects OR on an existing order header
+   * with DEP-ERR-OR-4110, so the caller must pick OV vs OR by whether the order
+   * is still in Apple.
+   */
+  private buildRemediationEntry(
     order: typeof orders.$inferSelect,
     depItems: (typeof orderItems.$inferSelect)[],
     resolvedCustomerId: string,
     now: string,
+    action: 'OR' | 'OV',
   ) {
+    const orderNumber = order.depOrderId || order.externalOrderId || String(order.id);
     return {
-      orderNumber: order.depOrderId || order.externalOrderId || String(order.id),
+      orderNumber,
       orderDate: order.depOrderedAt ? this.formatDate(order.depOrderedAt) : now,
-      orderType: 'OV',
+      orderType: action,
       customerId: resolvedCustomerId,
-      poNumber: order.po || undefined,
+      poNumber: this.sanitizePo(order.po),
       deliveries: [{
-        deliveryNumber: 'SELF',
+        deliveryNumber: action === 'OV' ? 'SELF' : `DEL_${orderNumber}`,
         shipDate: order.depShippedAt ? this.formatDate(order.depShippedAt) : now,
         devices: depItems.map((i) => ({ deviceId: i.serialNumber })),
       }],
@@ -221,18 +228,32 @@ export class DepActionsService {
   }
 
   /**
-   * Batched DEP Override for reconciliation remediation. Re-pushes the correct
-   * device list to Apple for many orders, chunked into one bulk-enroll request
-   * per chunk so Apple processes them faster than one call per order.
-   *
-   * dryRun (default true at the controller) returns exactly what WOULD be sent
-   * — no Apple call — so the operator can review before executing. On execute,
-   * one dep_transactions row is logged per order (sharing the chunk's Apple
-   * transaction id) so the existing poll scheduler resolves each order's outcome.
+   * Clean a PO before sending to Apple. Some migrated Duke POs carry a trailing
+   * comma or multiple comma-separated values (e.g. "4551127859,"); Apple rejects
+   * those with DEP-ERR-OR-4114. Take the first non-empty comma-separated token,
+   * trimmed; return undefined when there's nothing usable.
    */
-  async batchOverrideOrders(
+  private sanitizePo(po: string | null | undefined): string | undefined {
+    if (!po) return undefined;
+    const first = po.split(',')[0].trim();
+    return first.length > 0 ? first : undefined;
+  }
+
+  /**
+   * Batched DEP remediation for reconciliation. Per order it sends OV (override,
+   * for orders Apple still has) or OR (enroll, for orders Apple no longer has),
+   * chunked into one bulk-enroll request per chunk (orders of mixed type are
+   * fine — each entry carries its own orderType) so Apple processes them faster
+   * than one call per order.
+   *
+   * dryRun (default true at the controller) returns exactly what WOULD be sent —
+   * no Apple call. On execute, one dep_transactions row is logged per order
+   * (sharing the chunk's Apple transaction id) so the poll scheduler resolves
+   * each order's outcome.
+   */
+  async batchRemediate(
     db: TenantDb,
-    orderIds: number[],
+    candidates: { orderId: number; action: 'OR' | 'OV' }[],
     opts: { dryRun: boolean; chunkSize?: number },
   ) {
     const chunkSize = Math.min(Math.max(opts.chunkSize ?? 50, 1), 100);
@@ -242,34 +263,38 @@ export class DepActionsService {
       order: typeof orders.$inferSelect;
       depItems: (typeof orderItems.$inferSelect)[];
       resolvedCustomerId: string;
+      action: 'OR' | 'OV';
     }[] = [];
     const skipped: { orderId: number; reason: string }[] = [];
 
-    for (const orderId of orderIds) {
+    for (const c of candidates) {
       try {
-        const { order, items, resolvedCustomerId } = await this.loadOrderAndCreds(db, orderId);
+        const { order, items, resolvedCustomerId } = await this.loadOrderAndCreds(db, c.orderId);
         const depItems = items.filter((i) => i.isDep && !i.deletedAt);
         if (depItems.length === 0) {
-          skipped.push({ orderId, reason: 'No DEP-eligible devices' });
+          skipped.push({ orderId: c.orderId, reason: 'No DEP-eligible devices' });
           continue;
         }
-        prepared.push({ orderId, order, depItems, resolvedCustomerId });
+        prepared.push({ orderId: c.orderId, order, depItems, resolvedCustomerId, action: c.action });
       } catch (err) {
-        skipped.push({ orderId, reason: err instanceof Error ? err.message : String(err) });
+        skipped.push({ orderId: c.orderId, reason: err instanceof Error ? err.message : String(err) });
       }
     }
 
     if (opts.dryRun) {
       return {
         dryRun: true,
-        totalCandidates: orderIds.length,
+        totalCandidates: candidates.length,
         eligible: prepared.length,
+        overrides: prepared.filter((p) => p.action === 'OV').length,
+        enrolls: prepared.filter((p) => p.action === 'OR').length,
         skipped,
         chunkSize,
         chunkCount: Math.ceil(prepared.length / chunkSize),
         orders: prepared.map((p) => ({
           orderId: p.orderId,
           orderNumber: p.order.depOrderId || p.order.externalOrderId || String(p.order.id),
+          action: p.action,
           deviceCount: p.depItems.length,
           devices: p.depItems.map((i) => i.serialNumber),
         })),
@@ -281,52 +306,73 @@ export class DepActionsService {
 
     let submitted = 0;
     let failed = 0;
-    const chunks: {
-      orderCount: number;
-      accepted: boolean;
-      deviceEnrollmentTransactionId?: string | null;
-      error?: string;
-    }[] = [];
+    let chunkCount = 0;
+    const errorCounts: Record<string, number> = {};
     const errors: string[] = [];
+    const nowTs = new Date();
 
     for (let i = 0; i < prepared.length; i += chunkSize) {
+      chunkCount++;
       const slice = prepared.slice(i, i + chunkSize);
       const txnId = uuidv4().replace(/-/g, '').slice(0, 20);
       const now = this.formatDate(new Date());
       const entries = slice.map((p) =>
-        this.buildOverrideEntry(p.order, p.depItems, p.resolvedCustomerId, now),
+        this.buildRemediationEntry(p.order, p.depItems, p.resolvedCustomerId, now, p.action),
       );
       const request = this.buildBulkEnrollRequest(cred, txnId, entries);
 
+      let response: any = null;
+      let transportError: string | null = null;
       try {
-        const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
-        // One audit row per order, each carrying the per-order request and the
-        // shared batch response (so the poller can resolve each order).
-        for (const p of slice) {
-          const perTxnId = uuidv4().replace(/-/g, '').slice(0, 20);
-          const perRequest = this.buildBulkEnrollRequest(cred, perTxnId, [
-            this.buildOverrideEntry(p.order, p.depItems, p.resolvedCustomerId, now),
-          ]);
-          await this.logTransaction(db, p.orderId, perTxnId, 'OV', perRequest, response);
-        }
-        const outcome = this.submissionOutcome(response);
-        const deviceEnrollmentTransactionId = (response as any).deviceEnrollmentTransactionId ?? null;
-        if (outcome.accepted) {
-          submitted += slice.length;
-        } else {
-          failed += slice.length;
-          errors.push(`Chunk ${chunks.length + 1}: ${outcome.errorMessage}`);
-        }
-        chunks.push({ orderCount: slice.length, accepted: outcome.accepted, deviceEnrollmentTransactionId });
+        response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
       } catch (err) {
-        failed += slice.length;
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Chunk ${chunks.length + 1}: ${msg}`);
-        chunks.push({ orderCount: slice.length, accepted: false, error: msg });
+        transportError = err instanceof Error ? err.message : String(err);
+        errors.push(`Chunk ${chunkCount}: ${transportError}`);
+      }
+
+      // Apple's capitalization is deviceEnrollmentTransactionID; accept both.
+      const appleTxnId = response
+        ? response.deviceEnrollmentTransactionId || response.deviceEnrollmentTransactionID || null
+        : null;
+
+      // One dep_transactions row per order, with its real per-order outcome
+      // (Apple rejects per-order via orders[].orderPostStatus while returning a
+      // top-level transaction id), so the poll scheduler resolves the accepted
+      // ones and the errors are truthfully recorded.
+      for (const p of slice) {
+        const orderNumber = p.order.depOrderId || p.order.externalOrderId || String(p.order.id);
+        const perTxnId = uuidv4().replace(/-/g, '').slice(0, 20);
+        const perRequest = this.buildBulkEnrollRequest(cred, perTxnId, [
+          this.buildRemediationEntry(p.order, p.depItems, p.resolvedCustomerId, now, p.action),
+        ]);
+        const err = transportError
+          ? { code: 'TRANSPORT', message: transportError }
+          : this.perOrderError(response, orderNumber);
+
+        await db.insert(depTransactions).values({
+          orderId: p.orderId,
+          transactionId: perTxnId,
+          deviceEnrollmentTransactionId: err ? null : appleTxnId,
+          orderType: p.action,
+          status: err ? 'error' : 'in_progress',
+          requestPayload: JSON.stringify(perRequest),
+          responsePayload: response ? JSON.stringify(response) : undefined,
+          errorCode: err?.code,
+          errorMessage: err?.message ? err.message.slice(0, 1000) : undefined,
+          createdAt: nowTs,
+          updatedAt: nowTs,
+        });
+
+        if (err) {
+          failed++;
+          errorCounts[err.code] = (errorCounts[err.code] ?? 0) + 1;
+        } else {
+          submitted++;
+        }
       }
     }
 
-    return { dryRun: false, submitted, failed, skipped, chunkCount: chunks.length, chunks, errors };
+    return { dryRun: false, submitted, failed, chunkCount, errorCounts, skipped, errors };
   }
 
   /**
@@ -337,13 +383,41 @@ export class DepActionsService {
    */
   private submissionOutcome(response: unknown): { accepted: boolean; errorMessage: string | null } {
     const resp = response as any;
-    const accepted = !!resp.deviceEnrollmentTransactionId && !resp.errorCode && !resp.errorMessage;
+    // Apple answers HTTP 200 and returns a deviceEnrollmentTransactionID even
+    // when it rejects the order — the real rejection is per-order in
+    // orders[].orderPostStatus (e.g. DEP-ERR-OR-4109/4110/4114). Check both the
+    // top-level error AND per-order statuses, or we report false "accepted".
+    const txnId = resp.deviceEnrollmentTransactionId || resp.deviceEnrollmentTransactionID;
+    const orderErrors: string[] = (resp.orders ?? [])
+      .filter((o: any) => o?.orderPostStatus && String(o.orderPostStatus).startsWith('DEP-ERR'))
+      .map((o: any) => `${o.orderNumber}: ${o.orderPostStatus} ${o.orderPostStatusMessage ?? ''}`.trim());
+    const accepted = !!txnId && !resp.errorCode && !resp.errorMessage && orderErrors.length === 0;
     return {
       accepted,
       errorMessage: accepted
         ? null
-        : resp.errorMessage || resp.errorCode || 'Apple did not accept the submission.',
+        : resp.errorMessage || resp.errorCode || orderErrors.join('; ') || 'Apple did not accept the submission.',
     };
+  }
+
+  /**
+   * Per-order outcome within a bulk response. Returns the DEP error code for an
+   * order (from orders[].orderPostStatus, or the top-level error that applies to
+   * all), or null when that order was accepted.
+   */
+  private perOrderError(
+    response: unknown,
+    orderNumber: string,
+  ): { code: string; message: string } | null {
+    const resp = response as any;
+    const o = (resp.orders ?? []).find((x: any) => x?.orderNumber === orderNumber);
+    if (o?.orderPostStatus && String(o.orderPostStatus).startsWith('DEP-ERR')) {
+      return { code: String(o.orderPostStatus), message: String(o.orderPostStatusMessage ?? '') };
+    }
+    if (resp.errorCode || resp.errorMessage) {
+      return { code: String(resp.errorCode ?? 'ERROR'), message: String(resp.errorMessage ?? '') };
+    }
+    return null;
   }
 
   /**

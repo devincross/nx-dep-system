@@ -88,6 +88,22 @@ class RestoreItemsDto {
   limit?: number;
 }
 
+class BackfillHeadersDto {
+  /** Must be explicitly false to actually write to orders. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  dryRun?: boolean;
+
+  /** Max orders to backfill in this call (for a canary). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50000)
+  limit?: number;
+}
+
 class RemediateDto {
   /** Must be explicitly false to actually push overrides to Apple. */
   @IsOptional()
@@ -177,6 +193,19 @@ export class ReconciliationController {
   }
 
   /**
+   * Backfill orders.po / dep_ordered_at / dep_shipped_at from each order's
+   * original dep_transactions, for orders missing them. Dry-run by default.
+   */
+  @Post('backfill-order-headers')
+  async backfillOrderHeaders(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() body: BackfillHeadersDto,
+  ) {
+    const dryRun = body.dryRun !== false; // default true — safe
+    return this.reconciliationService.backfillOrderHeaders(tenant.db, { dryRun, limit: body.limit });
+  }
+
+  /**
    * Rebuild order_items from the run's captured Zoho lists (un-delete + insert +
    * is_dep) for orders whose devices were wrongly removed. Defaults to a dry-run
    * that reports exactly what would change per order. After executing, re-run the
@@ -209,11 +238,11 @@ export class ReconciliationController {
       runId,
       body.limit ?? 5000,
     );
-    const orderIds = candidates.map((c) => c.orderId);
-    const result = await this.depActionsService.batchOverrideOrders(tenant.db, orderIds, {
-      dryRun,
-      chunkSize: body.chunkSize,
-    });
+    const result = await this.depActionsService.batchRemediate(
+      tenant.db,
+      candidates.map((c) => ({ orderId: c.orderId, action: c.action })),
+      { dryRun, chunkSize: body.chunkSize },
+    );
     return { runId, candidateCount: candidates.length, ...result };
   }
 }
