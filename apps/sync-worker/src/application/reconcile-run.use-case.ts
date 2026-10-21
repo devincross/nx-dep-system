@@ -32,7 +32,7 @@ export class ReconcileRunUseCase {
 
   async processRun(deps: ProcessRunDeps): Promise<void> {
     const { reconRepo, orderRepo, zohoAdapter, mapper, depAdapter } = deps;
-    let run = deps.run;
+    const run = deps.run;
 
     try {
       if (run.status === 'pending') {
