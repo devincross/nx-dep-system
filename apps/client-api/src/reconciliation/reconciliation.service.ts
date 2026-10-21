@@ -1,5 +1,5 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, like, ne, notExists, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
@@ -441,17 +441,18 @@ export class ReconciliationService {
   }
 
   /**
-   * Remediation candidates: trusted orders (our DB == Zoho) with devices to
-   * restore to Apple, each tagged with the DEP action to use —
-   *   apple_devices IS NULL  → 'OR' (order gone from Apple; enroll)
-   *   otherwise              → 'OV' (order header still in Apple; override —
-   *                                  Apple rejects OR on an existing order with
-   *                                  DEP-ERR-OR-4110).
-   * Excludes orders that already have an OV/OR transaction, so chunked
-   * `remediate` calls advance through the backlog instead of re-pushing the same
-   * first N (large pushes must be chunked via `limit` to avoid gateway timeouts).
+   * Remediation candidates: trusted orders (our DB == Zoho) that a report run
+   * found still need restoring in Apple, each tagged with the DEP action —
+   *   apple_devices IS NULL / [] → 'OR' (order no longer posted; enroll)
+   *   otherwise                  → 'OV' (order still has devices; override)
+   *
+   * Candidacy is driven by the REPORT (Apple's state), not our transaction log —
+   * the log can't be trusted (a timed-out bulk run logged thousands of rows, and
+   * the old acceptance check mis-recorded per-order rejections). Page through
+   * with limit/offset to chunk large pushes under the gateway timeout; re-run a
+   * fresh report between full passes so already-restored orders drop out.
    */
-  async getRemediationCandidates(db: TenantDb, runId: string, limit: number) {
+  async getRemediationCandidates(db: TenantDb, runId: string, limit: number, offset = 0) {
     const rows = await db
       .select({
         orderId: reconciliationFindings.orderId,
@@ -473,21 +474,11 @@ export class ReconciliationService {
           // PO/date backfill first.
           sql`${orders.po} is not null and ${orders.po} <> ''`,
           sql`${orders.depOrderedAt} is not null`,
-          notExists(
-            db
-              .select({ one: sql`1` })
-              .from(depTransactions)
-              .where(
-                and(
-                  eq(depTransactions.orderId, reconciliationFindings.orderId),
-                  inArray(depTransactions.orderType, ['OV', 'OR']),
-                ),
-              ),
-          ),
         ),
       )
       .orderBy(reconciliationFindings.orderId)
-      .limit(limit);
+      .limit(limit)
+      .offset(offset);
     return rows.map((r) => {
       const apple = parseList(r.appleDevices);
       // Order no longer posted in Apple (no devices) → enroll (OR). Still has

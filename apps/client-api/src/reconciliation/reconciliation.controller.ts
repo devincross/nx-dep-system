@@ -111,13 +111,20 @@ class RemediateDto {
   @IsBoolean()
   dryRun?: boolean;
 
-  /** Max candidate orders to remediate in this call. */
+  /** Max candidate orders to remediate in this call (page size). */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(50000)
   limit?: number;
+
+  /** Page offset — advance by `limit` each call to chunk a large push. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
 
   /** Orders per Apple bulk-enroll request. */
   @IsOptional()
@@ -233,16 +240,18 @@ export class ReconciliationController {
     @Body() body: RemediateDto,
   ) {
     const dryRun = body.dryRun !== false; // default true — safe
+    const offset = body.offset ?? 0;
     const candidates = await this.reconciliationService.getRemediationCandidates(
       tenant.db,
       runId,
       body.limit ?? 5000,
+      offset,
     );
     const result = await this.depActionsService.batchRemediate(
       tenant.db,
       candidates.map((c) => ({ orderId: c.orderId, action: c.action })),
       { dryRun, chunkSize: body.chunkSize },
     );
-    return { runId, candidateCount: candidates.length, ...result };
+    return { runId, offset, candidateCount: candidates.length, ...result };
   }
 }
