@@ -572,6 +572,23 @@ export class HistoricalImportService {
     };
 
     return (raw: Record<string, unknown>): MappedOrder => {
+      // Guard against an incomplete Zoho fetch (mirrors the sync-worker's
+      // DynamicZohoMapper): Zoho returns every requested field as a present
+      // key (null when empty), so a genuinely empty order still carries the
+      // serial field. A record missing the field entirely was never fully
+      // fetched — importing it would read zero serials. Refuse it so the
+      // per-record catch records an error instead of importing a stub.
+      const hasField = (path: string): boolean =>
+        Object.prototype.hasOwnProperty.call(raw, path.split('.')[0]);
+      if (!hasField(itemsCfg.sourceField) && !hasField(itemsCfg.serialNumbers)) {
+        const id = String(this.resolveFieldPath(raw, orderCfg.externalOrderId) ?? '(unknown id)');
+        throw new Error(
+          `Zoho order ${id} returned without its serial field ` +
+          `(neither '${itemsCfg.sourceField}' nor '${itemsCfg.serialNumbers}' present) — ` +
+          `refusing an incomplete record. Check the Zoho token's field-read scope and field mappings.`,
+        );
+      }
+
       const items: MappedOrderItem[] = [];
       const rawItems = this.resolveFieldPath(raw, itemsCfg.sourceField);
       // Subform line items (array under sourceField), else the serial(s) live
@@ -815,17 +832,22 @@ export class HistoricalImportService {
     result: ImportResult,
     errorMsg?: string,
   ) {
+    // Per-record failures (e.g. incomplete Zoho records refused by the
+    // mapper) are caught in the import loop and counted in result.errored —
+    // treat those as a failed run too, so the status reflects them and the
+    // success watermark doesn't advance past an incomplete pull.
+    const hasErrors = !!errorMsg || result.errored > 0;
     await db
       .update(syncStatusTable)
       .set({
-        status: errorMsg ? 'error' : 'success',
+        status: hasErrors ? 'error' : 'success',
         recordsProcessed: result.processed,
         recordsCreated: result.created,
         recordsUpdated: result.updated,
         recordsErrored: result.errored,
         errorMessage: errorMsg || (result.errors[0] ?? null),
         completedAt: new Date(),
-        lastSuccessAt: errorMsg ? undefined : new Date(),
+        lastSuccessAt: hasErrors ? undefined : new Date(),
         updatedAt: new Date(),
       })
       .where(eq(syncStatusTable.id, id));
