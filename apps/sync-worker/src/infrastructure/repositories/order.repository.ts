@@ -20,9 +20,19 @@ export class OrderRepository implements OrderRepositoryPort {
   private readonly logger = new Logger(OrderRepository.name);
   private db: TenantDb | null = null;
   private changeRepository: OrderChangeRepositoryPort | null = null;
+  // When false, item is_dep is left untouched on update. The reconciliation
+  // worker sets this so rebuilding our DB from the source never downgrades
+  // is_dep (DEP-eligibility is "has a serial" + owned by the DEP pipeline, not
+  // the source feed) — otherwise a report run resets restored devices to
+  // is_dep=0 and blocks the override.
+  private syncIsDep = true;
 
   setDb(db: TenantDb): void {
     this.db = db;
+  }
+
+  setSyncIsDep(value: boolean): void {
+    this.syncIsDep = value;
   }
 
   setChangeRepository(changeRepository: OrderChangeRepositoryPort): void {
@@ -382,7 +392,7 @@ export class OrderRepository implements OrderRepositoryPort {
         // emit 'pending' — syncing it would revert enrolled items.
         const fieldChanges: ChangedFields = {};
 
-        if (existing.isDep !== incoming.isDep) {
+        if (this.syncIsDep && existing.isDep !== incoming.isDep) {
           fieldChanges['isDep'] = { old: existing.isDep, new: incoming.isDep };
         }
 

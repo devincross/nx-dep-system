@@ -117,9 +117,13 @@ export class ReconciliationScheduler {
       }
 
       // Corrections must stay silent (no change repository) so they never emit
-      // order_changes / trigger the downstream auto-push / OV path.
+      // order_changes / trigger the downstream auto-push / OV path. And they
+      // must NOT sync is_dep from the source — DEP-eligibility is "has a serial"
+      // and owned by the DEP pipeline; syncing it would downgrade restored
+      // devices to is_dep=0 and block the override.
       const orderRepo = new OrderRepository();
       orderRepo.setDb(tenantDb);
+      orderRepo.setSyncIsDep(false);
 
       await this.reconcileRunUseCase.processRun({
         run,

@@ -1,11 +1,12 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray, like, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, ne, notExists, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
   reconciliationRuns,
   reconciliationFindings,
   orderItems,
+  depTransactions,
 } from '@org/database';
 
 export interface CreateRunOptions {
@@ -328,7 +329,12 @@ export class ReconciliationService {
     };
   }
 
-  /** ov_restore candidate findings for the remediation step. */
+  /**
+   * ov_restore candidate findings for the remediation step. Excludes orders
+   * that already have an OV transaction, so chunked `remediate` calls advance
+   * through the backlog instead of re-pushing the same first N (large pushes
+   * must be chunked via `limit` to avoid gateway timeouts).
+   */
   async getRemediationCandidates(db: TenantDb, runId: string, limit: number) {
     const rows = await db
       .select()
@@ -337,6 +343,17 @@ export class ReconciliationService {
         and(
           eq(reconciliationFindings.runId, runId),
           eq(reconciliationFindings.recommendedAction, 'ov_restore'),
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(depTransactions)
+              .where(
+                and(
+                  eq(depTransactions.orderId, reconciliationFindings.orderId),
+                  eq(depTransactions.orderType, 'OV'),
+                ),
+              ),
+          ),
         ),
       )
       .orderBy(reconciliationFindings.orderId)

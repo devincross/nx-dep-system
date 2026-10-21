@@ -100,7 +100,7 @@ class RemediateDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(5000)
+  @Max(50000)
   limit?: number;
 
   /** Orders per Apple bulk-enroll request. */
