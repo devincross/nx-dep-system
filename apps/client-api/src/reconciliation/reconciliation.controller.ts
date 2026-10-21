@@ -88,6 +88,22 @@ class RestoreItemsDto {
   limit?: number;
 }
 
+class BackfillHeadersDto {
+  /** Must be explicitly false to actually write to orders. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  dryRun?: boolean;
+
+  /** Max orders to backfill in this call (for a canary). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50000)
+  limit?: number;
+}
+
 class RemediateDto {
   /** Must be explicitly false to actually push overrides to Apple. */
   @IsOptional()
@@ -174,6 +190,19 @@ export class ReconciliationController {
   @Post('runs/:runId/cancel')
   async cancel(@CurrentTenant() tenant: TenantContext, @Param('runId') runId: string) {
     return this.reconciliationService.cancel(tenant.db, runId);
+  }
+
+  /**
+   * Backfill orders.po / dep_ordered_at / dep_shipped_at from each order's
+   * original dep_transactions, for orders missing them. Dry-run by default.
+   */
+  @Post('backfill-order-headers')
+  async backfillOrderHeaders(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() body: BackfillHeadersDto,
+  ) {
+    const dryRun = body.dryRun !== false; // default true — safe
+    return this.reconciliationService.backfillOrderHeaders(tenant.db, { dryRun, limit: body.limit });
   }
 
   /**

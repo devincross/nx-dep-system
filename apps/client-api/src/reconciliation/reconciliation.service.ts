@@ -1,5 +1,5 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray, like, ne, notExists, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, ne, notExists, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   TenantDb,
@@ -31,6 +31,36 @@ function parseList(json: string | null): string[] | null {
   } catch {
     return [];
   }
+}
+
+/**
+ * Parse a stored DEP payload. Our own rows are single-encoded JSON; the
+ * legacy-imported rows are double-encoded (a JSON string of a JSON object), so
+ * parse twice when the first parse yields a string.
+ */
+function parsePayload(raw: string | null): any {
+  if (!raw) return null;
+  try {
+    let v: any = JSON.parse(raw);
+    if (typeof v === 'string') v = JSON.parse(v);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+/** Pull the order header (PO + dates) from a DEP payload's first order. */
+function extractHeader(
+  payload: any,
+): { po?: string; orderDate?: string; shipDate?: string } | null {
+  const o = payload?.orders?.[0];
+  if (!o) return null;
+  const po = typeof o.poNumber === 'string' ? o.poNumber.split(',')[0].trim() : undefined;
+  const orderDate = typeof o.orderDate === 'string' ? o.orderDate : undefined;
+  const shipDate =
+    typeof o.deliveries?.[0]?.shipDate === 'string' ? o.deliveries[0].shipDate : orderDate;
+  if (!po && !orderDate) return null;
+  return { po: po || undefined, orderDate, shipDate };
 }
 
 @Injectable()
@@ -327,6 +357,86 @@ export class ReconciliationService {
       totalUndelete: undeleteIds.length,
       totalInsert: insertRows.length,
       orders: perOrder,
+    };
+  }
+
+  /**
+   * Backfill orders.po / dep_ordered_at / dep_shipped_at from each order's
+   * original dep_transactions payload, for orders missing them (the SO219537-type
+   * that remediation excludes). Apple needs the original PO + order date in the
+   * header. dryRun reports exactly what it would set per order before writing.
+   */
+  async backfillOrderHeaders(db: TenantDb, opts: { dryRun: boolean; limit?: number }) {
+    const base = db
+      .select({
+        id: orders.id,
+        depOrderId: orders.depOrderId,
+        po: orders.po,
+        depOrderedAt: orders.depOrderedAt,
+        depShippedAt: orders.depShippedAt,
+      })
+      .from(orders)
+      .where(or(isNull(orders.po), eq(orders.po, ''), isNull(orders.depOrderedAt)))
+      .orderBy(orders.id);
+    const targets = opts.limit ? await base.limit(opts.limit) : await base;
+
+    const updates: {
+      orderId: number;
+      orderNumber: string | null;
+      po?: string;
+      orderDate?: string;
+      shipDate?: string;
+    }[] = [];
+    const skipped: { orderId: number; reason: string }[] = [];
+
+    for (const o of targets) {
+      const txns = await db
+        .select({ req: depTransactions.requestPayload, res: depTransactions.responsePayload })
+        .from(depTransactions)
+        .where(eq(depTransactions.orderId, o.id));
+
+      let header: { po?: string; orderDate?: string; shipDate?: string } | null = null;
+      for (const t of txns) {
+        header = extractHeader(parsePayload(t.res)) || extractHeader(parsePayload(t.req));
+        if (header?.po && header?.orderDate) break;
+      }
+      if (!header || (!header.po && !header.orderDate)) {
+        skipped.push({ orderId: o.id, reason: 'no recoverable PO/date in transactions' });
+        continue;
+      }
+
+      const set: { po?: string; depOrderedAt?: Date; depShippedAt?: Date; updatedAt: Date } = {
+        updatedAt: new Date(),
+      };
+      const preview: (typeof updates)[number] = { orderId: o.id, orderNumber: o.depOrderId };
+      if (!o.po && header.po) {
+        set.po = header.po;
+        preview.po = header.po;
+      }
+      if (!o.depOrderedAt && header.orderDate && !isNaN(Date.parse(header.orderDate))) {
+        set.depOrderedAt = new Date(header.orderDate);
+        preview.orderDate = header.orderDate;
+      }
+      if (!o.depShippedAt && header.shipDate && !isNaN(Date.parse(header.shipDate))) {
+        set.depShippedAt = new Date(header.shipDate);
+        preview.shipDate = header.shipDate;
+      }
+
+      if (preview.po === undefined && preview.orderDate === undefined && preview.shipDate === undefined) {
+        continue; // nothing missing to set
+      }
+      updates.push(preview);
+      if (!opts.dryRun) {
+        await db.update(orders).set(set).where(eq(orders.id, o.id));
+      }
+    }
+
+    return {
+      dryRun: opts.dryRun,
+      ordersAffected: updates.length,
+      skippedCount: skipped.length,
+      updates,
+      skipped,
     };
   }
 
