@@ -72,6 +72,22 @@ class FindingsQueryDto {
   search?: string;
 }
 
+class RestoreItemsDto {
+  /** Must be explicitly false to actually write to order_items. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  dryRun?: boolean;
+
+  /** Max orders to restore in this call (for a canary). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20000)
+  limit?: number;
+}
+
 class RemediateDto {
   /** Must be explicitly false to actually push overrides to Apple. */
   @IsOptional()
@@ -158,6 +174,22 @@ export class ReconciliationController {
   @Post('runs/:runId/cancel')
   async cancel(@CurrentTenant() tenant: TenantContext, @Param('runId') runId: string) {
     return this.reconciliationService.cancel(tenant.db, runId);
+  }
+
+  /**
+   * Rebuild order_items from the run's captured Zoho lists (un-delete + insert +
+   * is_dep) for orders whose devices were wrongly removed. Defaults to a dry-run
+   * that reports exactly what would change per order. After executing, re-run the
+   * report so these reclassify as ov_restore, then remediate.
+   */
+  @Post('runs/:runId/restore-items')
+  async restoreItems(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('runId') runId: string,
+    @Body() body: RestoreItemsDto,
+  ) {
+    const dryRun = body.dryRun !== false; // default true — safe
+    return this.reconciliationService.restoreItems(tenant.db, runId, { dryRun, limit: body.limit });
   }
 
   /**

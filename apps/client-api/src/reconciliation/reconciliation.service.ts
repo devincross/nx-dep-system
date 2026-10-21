@@ -5,6 +5,7 @@ import {
   TenantDb,
   reconciliationRuns,
   reconciliationFindings,
+  orderItems,
 } from '@org/database';
 
 export interface CreateRunOptions {
@@ -216,6 +217,115 @@ export class ReconciliationService {
       .set({ status: 'canceled', updatedAt: new Date() })
       .where(eq(reconciliationRuns.runId, runId));
     return { runId, status: 'canceled' as const };
+  }
+
+  /**
+   * Rebuild our order_items from the run's captured Zoho lists (the recovery
+   * source): un-delete soft-deleted serials Zoho still lists, insert Zoho
+   * serials we have no row for, and set is_dep = 1. Targets findings where our
+   * active devices don't match Zoho (zoho_match = false). dryRun reports exactly
+   * what it would change, per order, without writing.
+   *
+   * After executing, re-run the reconciliation report so these orders reclassify
+   * as ov_restore, then remediate (OV) to push the devices back into Apple DEP.
+   */
+  async restoreItems(db: TenantDb, runId: string, opts: { dryRun: boolean; limit?: number }) {
+    await this.getRun(db, runId); // 404 if the run doesn't exist
+
+    const where = and(
+      eq(reconciliationFindings.runId, runId),
+      eq(reconciliationFindings.zohoMatch, false),
+    );
+    const base = db
+      .select({
+        orderId: reconciliationFindings.orderId,
+        orderNumber: reconciliationFindings.orderNumber,
+        zohoDevices: reconciliationFindings.zohoDevices,
+      })
+      .from(reconciliationFindings)
+      .where(where)
+      .orderBy(reconciliationFindings.orderId);
+    const findings = opts.limit ? await base.limit(opts.limit) : await base;
+
+    const targets = findings
+      .map((f) => ({ orderId: f.orderId, orderNumber: f.orderNumber, zoho: parseList(f.zohoDevices) ?? [] }))
+      .filter((f) => f.zoho.length > 0);
+
+    const perOrder: { orderId: number; orderNumber: string | null; undelete: string[]; insert: string[] }[] = [];
+    const undeleteIds: number[] = [];
+    const insertRows: (typeof orderItems.$inferInsert)[] = [];
+    const now = new Date();
+    const CHUNK = 200;
+
+    for (let i = 0; i < targets.length; i += CHUNK) {
+      const slice = targets.slice(i, i + CHUNK);
+      const ids = slice.map((s) => s.orderId);
+      const rows = await db
+        .select({
+          id: orderItems.id,
+          orderId: orderItems.orderId,
+          serialNumber: orderItems.serialNumber,
+          deletedAt: orderItems.deletedAt,
+        })
+        .from(orderItems)
+        .where(inArray(orderItems.orderId, ids));
+
+      const byOrder = new Map<number, { id: number; serial: string; deleted: boolean }[]>();
+      for (const r of rows) {
+        const arr = byOrder.get(r.orderId) ?? [];
+        arr.push({ id: r.id, serial: r.serialNumber, deleted: r.deletedAt != null });
+        byOrder.set(r.orderId, arr);
+      }
+
+      for (const t of slice) {
+        const bySerial = new Map((byOrder.get(t.orderId) ?? []).map((it) => [it.serial, it]));
+        const undelete: string[] = [];
+        const insert: string[] = [];
+        for (const serial of t.zoho) {
+          const existing = bySerial.get(serial);
+          if (!existing) {
+            insert.push(serial);
+          } else if (existing.deleted) {
+            undelete.push(serial);
+            undeleteIds.push(existing.id);
+          }
+        }
+        if (undelete.length || insert.length) {
+          perOrder.push({ orderId: t.orderId, orderNumber: t.orderNumber, undelete, insert });
+          for (const serial of insert) {
+            insertRows.push({
+              orderId: t.orderId,
+              serialNumber: serial,
+              isDep: true,
+              depStatus: 'pending',
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+      }
+    }
+
+    if (!opts.dryRun) {
+      for (let i = 0; i < undeleteIds.length; i += 500) {
+        await db
+          .update(orderItems)
+          .set({ deletedAt: null, isDep: true, updatedAt: now })
+          .where(inArray(orderItems.id, undeleteIds.slice(i, i + 500)));
+      }
+      for (let i = 0; i < insertRows.length; i += 500) {
+        await db.insert(orderItems).values(insertRows.slice(i, i + 500));
+      }
+    }
+
+    return {
+      runId,
+      dryRun: opts.dryRun,
+      ordersAffected: perOrder.length,
+      totalUndelete: undeleteIds.length,
+      totalInsert: insertRows.length,
+      orders: perOrder,
+    };
   }
 
   /** ov_restore candidate findings for the remediation step. */
