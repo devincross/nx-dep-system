@@ -13,6 +13,7 @@ import {
 import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
+import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { OrderRepository } from '../infrastructure/repositories/order.repository.js';
 import { OrderChangeRepository } from '../infrastructure/repositories/order-change.repository.js';
@@ -115,9 +116,11 @@ export class DepPushScheduler {
       accountRepository.setDb(tenantDb);
       orderRepository.setChangeRepository(orderChangeRepository);
 
-      // For pushing submission rejections back to the NetSuite order —
-      // null for tenants without NetSuite credentials
-      const netsuiteAdapter = await this.getNetsuiteAdapter(tenantDb);
+      // For pushing submission rejections back to the ERP order. Prefer
+      // NetSuite (existing behavior); fall back to Zoho for Zoho tenants.
+      // Null when neither ERP is connected.
+      const erpAdapter =
+        (await this.getNetsuiteAdapter(tenantDb)) ?? (await this.getZohoAdapter(tenantDb));
 
       const result = await this.depPushUseCase.execute(
         orderChangeRepository,
@@ -125,7 +128,7 @@ export class DepPushScheduler {
         depAdapter,
         depTransactionRepo,
         accountRepository,
-        netsuiteAdapter,
+        erpAdapter,
       );
 
       if (result.submitted > 0 || result.failed > 0) {
@@ -151,6 +154,35 @@ export class DepPushScheduler {
       return NetsuiteAdapter.fromConnectionData(parseConnectionData(results[0].connectionData));
     } catch (error) {
       this.logger.error(`Failed to parse NetSuite credentials: ${error}`);
+      return null;
+    }
+  }
+
+  private async getZohoAdapter(db: TenantDb): Promise<ZohoAdapter | null> {
+    const results = await db
+      .select()
+      .from(credentials)
+      .where(and(eq(credentials.type, 'zoho'), eq(credentials.status, 'current')))
+      .limit(1);
+
+    if (results.length === 0) return null;
+
+    try {
+      const data = parseConnectionData(results[0].connectionData);
+      const adapter = new ZohoAdapter();
+      adapter.configure({
+        clientId: data['client_id'] as string,
+        clientSecret: data['client_secret'] as string,
+        refreshToken: data['refresh_token'] as string,
+        apiDomain: (data['api_domain'] as string) || 'https://www.zohoapis.com',
+        accountsModule: (data['accounts_module'] as string) || 'Accounts',
+        ordersModule: (data['orders_module'] as string) || 'Sales_Orders',
+        depStatusField: (data['zoho_dep_status_field'] as string) || 'DEP_Status',
+        depResponseField: (data['zoho_dep_response_field'] as string) || 'DEP_Response',
+      });
+      return adapter;
+    } catch (error) {
+      this.logger.error(`Failed to parse Zoho credentials: ${error}`);
       return null;
     }
   }

@@ -15,6 +15,8 @@ import {
 } from '@org/database';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
+import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
+import { ErpOrderWriteback } from '../domain/ports/erp-writeback.port.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
 import { parseConnectionData } from '../infrastructure/credential-decrypt.util.js';
 
@@ -120,9 +122,11 @@ export class DepPollScheduler {
 
       depAdapter.configure(depCred);
 
-      // NetSuite adapter for pushing DEP outcomes back to the source
-      // system — null for tenants without NetSuite credentials
-      const netsuiteAdapter = await this.getNetsuiteAdapter(tenantDb);
+      // ERP adapter for pushing DEP outcomes back to the source system.
+      // Prefer NetSuite (existing behavior); fall back to Zoho for Zoho
+      // tenants. Null when neither ERP is connected.
+      const erpAdapter =
+        (await this.getNetsuiteAdapter(tenantDb)) ?? (await this.getZohoAdapter(tenantDb));
 
       for (const txn of pendingTxns) {
         if (!txn.deviceEnrollmentTransactionId) continue;
@@ -140,7 +144,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'complete', response);
-            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'complete');
+            await this.pushOutcomeToErp(tenantDb, erpAdapter, txn, 'complete');
             this.logger.log(`DEP transaction ${txn.transactionId} completed`);
           } else if ((response as any).statusCode === 'COMPLETE_WITH_ERRORS') {
             const errorMsg = this.extractErrors(response);
@@ -150,7 +154,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'posted_with_errors', response);
-            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
+            await this.pushOutcomeToErp(tenantDb, erpAdapter, txn, 'error', errorMsg);
             this.logger.warn(`DEP transaction ${txn.transactionId} posted with errors: ${errorMsg}`);
           } else if (response.statusCode === 'ERROR') {
             const errorMsg = this.extractErrors(response);
@@ -160,7 +164,7 @@ export class DepPollScheduler {
               completedAt: response.completedOn ? new Date(response.completedOn) : new Date(),
             });
             await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
-            await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
+            await this.pushOutcomeToErp(tenantDb, erpAdapter, txn, 'error', errorMsg);
             this.logger.warn(`DEP transaction ${txn.transactionId} errored: ${errorMsg}`);
           } else if (response.checkTransactionErrorResponse) {
             const errors = response.checkTransactionErrorResponse;
@@ -178,7 +182,7 @@ export class DepPollScheduler {
                 errorMessage: errorMsg,
               });
               await this.applyOutcomeToOrder(tenantDb, txn, 'error', response);
-              await this.pushOutcomeToNetsuite(tenantDb, netsuiteAdapter, txn, 'error', errorMsg);
+              await this.pushOutcomeToErp(tenantDb, erpAdapter, txn, 'error', errorMsg);
             }
           }
           // else: still in progress, leave as-is
@@ -232,10 +236,15 @@ export class DepPollScheduler {
     // Enrollment transactions mark their devices complete; returns/voids don't
     if (txn.orderType === 'OR' || txn.orderType === 'OV') {
       let completedSerials = this.extractDeviceIds(response, 'completed');
-      if (completedSerials.length === 0 && status === 'complete') {
-        // Apple sometimes returns no device detail — fall back to the
-        // devices we submitted in the original request
-        completedSerials = this.deviceIdsFromRequestPayload(txn.requestPayload);
+      if (status === 'complete') {
+        // An overall-COMPLETE transaction means every submitted device
+        // enrolled, even when Apple's response omits some (or all) device
+        // detail. Union the reported serials with the full submitted set so
+        // no device is left in 'submitted' — otherwise the order never rolls
+        // up to complete and this transaction won't be polled again.
+        completedSerials = [
+          ...new Set([...completedSerials, ...this.deviceIdsFromRequestPayload(txn.requestPayload)]),
+        ];
       }
       if (completedSerials.length > 0) {
         await db.update(orderItems)
@@ -277,18 +286,18 @@ export class DepPollScheduler {
   }
 
   /**
-   * Push a resolved DEP outcome back to the NetSuite order (same RESTlet
-   * contract as the legacy system: PUT { order_id, dep_response, dep_status }).
-   * Best-effort — a NetSuite failure is logged but never blocks the poll.
+   * Push a resolved DEP outcome back to the tenant's ERP order (NetSuite or
+   * Zoho). Both adapters share the updateOrderDepStatus contract.
+   * Best-effort — an ERP failure is logged but never blocks the poll.
    */
-  private async pushOutcomeToNetsuite(
+  private async pushOutcomeToErp(
     db: TenantDb,
-    netsuite: NetsuiteAdapter | null,
+    erp: ErpOrderWriteback | null,
     txn: { orderId: number | null; orderType: string; transactionId: string },
     outcome: 'complete' | 'error',
     errorMessage?: string,
   ): Promise<void> {
-    if (!netsuite || !txn.orderId) return;
+    if (!erp || !txn.orderId) return;
 
     const rows = await db
       .select({ externalOrderId: orders.externalOrderId })
@@ -311,16 +320,16 @@ export class DepPollScheduler {
     }
 
     try {
-      await netsuite.updateOrderDepStatus(externalOrderId, depResponse, depStatus);
+      await erp.updateOrderDepStatus(externalOrderId, depResponse, depStatus);
       await recordErpWriteback(db, { orderId: txn.orderId }, null);
       this.logger.log(
-        `Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId} (txn ${txn.transactionId})`,
+        `Pushed DEP status '${depStatus}' to ERP for order ${externalOrderId} (txn ${txn.transactionId})`,
       );
     } catch (error) {
       this.logger.error(
-        `Failed to push DEP status to NetSuite for order ${externalOrderId}: ${error}`,
+        `Failed to push DEP status to ERP for order ${externalOrderId}: ${error}`,
       );
-      await recordErpWriteback(db, { orderId: txn.orderId }, `NetSuite write-back failed: ${error}`);
+      await recordErpWriteback(db, { orderId: txn.orderId }, `ERP write-back failed: ${error}`);
     }
   }
 
@@ -341,6 +350,40 @@ export class DepPollScheduler {
       return NetsuiteAdapter.fromConnectionData(parseConnectionData(results[0].connectionData));
     } catch (error) {
       this.logger.error(`Failed to parse NetSuite credentials: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Per-run Zoho adapter from the tenant's credentials, or null when the
+   * tenant isn't Zoho-backed. Writing order status requires the token to
+   * hold the ZohoCRM.modules.salesorders.UPDATE scope.
+   */
+  private async getZohoAdapter(db: TenantDb): Promise<ZohoAdapter | null> {
+    const results = await db
+      .select()
+      .from(credentials)
+      .where(and(eq(credentials.type, 'zoho'), eq(credentials.status, 'current')))
+      .limit(1);
+
+    if (results.length === 0) return null;
+
+    try {
+      const data = parseConnectionData(results[0].connectionData);
+      const adapter = new ZohoAdapter();
+      adapter.configure({
+        clientId: data['client_id'] as string,
+        clientSecret: data['client_secret'] as string,
+        refreshToken: data['refresh_token'] as string,
+        apiDomain: (data['api_domain'] as string) || 'https://www.zohoapis.com',
+        accountsModule: (data['accounts_module'] as string) || 'Accounts',
+        ordersModule: (data['orders_module'] as string) || 'Sales_Orders',
+        depStatusField: (data['zoho_dep_status_field'] as string) || 'DEP_Status',
+        depResponseField: (data['zoho_dep_response_field'] as string) || 'DEP_Response',
+      });
+      return adapter;
+    } catch (error) {
+      this.logger.error(`Failed to parse Zoho credentials: ${error}`);
       return null;
     }
   }

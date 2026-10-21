@@ -387,7 +387,7 @@ export class DepActionsService {
 
       // Fully enrolled — reflect it on the NetSuite order
       if (newOrderStatus === 'complete') {
-        await this.pushDepStatusToNetsuite(db, order.externalOrderId, 'Complete', 'Complete');
+        await this.pushDepStatusToErp(db, order.externalOrderId, 'Complete', 'Complete');
       }
     }
 
@@ -506,9 +506,9 @@ export class DepActionsService {
       const depResponse = txn.orderType === 'RE' ? 'Return Complete'
         : txn.orderType === 'VD' ? 'Void Complete'
         : 'Complete';
-      await this.pushDepStatusToNetsuite(db, order.externalOrderId, depResponse, 'Complete');
+      await this.pushDepStatusToErp(db, order.externalOrderId, depResponse, 'Complete');
     } else if (status === 'error' || status === 'posted_with_errors') {
-      await this.pushDepStatusToNetsuite(
+      await this.pushDepStatusToErp(
         db,
         order.externalOrderId,
         errorMessage || 'There is a problem with this order',
@@ -565,10 +565,14 @@ export class DepActionsService {
     // Enrollment transactions mark their devices complete; returns/voids don't
     if (orderType === 'OR' || orderType === 'OV') {
       let completedSerials = this.extractCompletedDeviceIds(response);
-      if (completedSerials.length === 0 && status === 'complete') {
-        // Apple sometimes returns no device detail — fall back to the
-        // devices we submitted in the original request
-        completedSerials = this.deviceIdsFromRequestPayload(requestPayload);
+      if (status === 'complete') {
+        // An overall-COMPLETE transaction means every submitted device
+        // enrolled, even when Apple's response omits some (or all) device
+        // detail. Union the reported serials with the full submitted set so
+        // no device is left in 'submitted' and the order can roll up.
+        completedSerials = [
+          ...new Set([...completedSerials, ...this.deviceIdsFromRequestPayload(requestPayload)]),
+        ];
       }
       if (completedSerials.length > 0) {
         await db.update(orderItems)
@@ -983,12 +987,13 @@ export class DepActionsService {
   }
 
   /**
-   * Push a DEP outcome back to the NetSuite order via the order RESTlet
-   * (same contract as the legacy system: PUT { order_id, dep_response,
-   * dep_status }). Best-effort — a NetSuite failure is logged, never thrown,
-   * and tenants without NetSuite credentials are skipped.
+   * Push a DEP outcome back to the tenant's ERP order. Routes to whichever
+   * ERP is connected: NetSuite (order RESTlet, PUT { order_id, dep_response,
+   * dep_status }) when NetSuite credentials exist, otherwise Zoho. Best-effort
+   * — a failure is logged, never thrown, and tenants without an ERP are
+   * skipped.
    */
-  private async pushDepStatusToNetsuite(
+  private async pushDepStatusToErp(
     db: TenantDb,
     externalOrderId: string | null | undefined,
     depResponse: string,
@@ -997,14 +1002,25 @@ export class DepActionsService {
     if (!externalOrderId) return;
 
     try {
-      const cred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
-      if (!cred) return;
-      await this.netsuitePutDepStatus(db, cred.connectionData as Record<string, unknown>, externalOrderId, depResponse, depStatus);
-      await recordErpWriteback(db, { externalOrderId }, null);
-      this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
+      const netsuiteCred = await this.credentialsService.findNewestActiveByType(db, 'netsuite');
+      if (netsuiteCred) {
+        await this.netsuitePutDepStatus(db, netsuiteCred.connectionData as Record<string, unknown>, externalOrderId, depResponse, depStatus);
+        await recordErpWriteback(db, { externalOrderId }, null);
+        this.logger.log(`Pushed DEP status '${depStatus}' to NetSuite for order ${externalOrderId}`);
+        return;
+      }
+
+      const zohoCred = await this.credentialsService.findNewestActiveByType(db, 'zoho');
+      if (zohoCred) {
+        await this.pushDepStatusToZoho(db, externalOrderId, depResponse, depStatus);
+        await recordErpWriteback(db, { externalOrderId }, null);
+        this.logger.log(`Pushed DEP status '${depStatus}' to Zoho for order ${externalOrderId}`);
+        return;
+      }
+      // No ERP connected — nothing to push.
     } catch (err) {
-      this.logger.warn(`NetSuite DEP status push failed for order ${externalOrderId}: ${err}`);
-      await recordErpWriteback(db, { externalOrderId }, `NetSuite write-back failed: ${err instanceof Error ? err.message : err}`);
+      this.logger.warn(`ERP DEP status push failed for order ${externalOrderId}: ${err}`);
+      await recordErpWriteback(db, { externalOrderId }, `ERP write-back failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -1200,7 +1216,7 @@ export class DepActionsService {
         .from(orders)
         .where(eq(orders.id, orderId))
         .limit(1);
-      await this.pushDepStatusToNetsuite(
+      await this.pushDepStatusToErp(
         db,
         rows[0]?.externalOrderId,
         resp.errorMessage || resp.errorCode || 'Apple DEP rejected the submission',

@@ -6,6 +6,7 @@ import {
   RawAccountData,
   RawOrderData,
 } from '../../../domain/ports/data-source.port.js';
+import { ErpOrderWriteback } from '../../../domain/ports/erp-writeback.port.js';
 import {
   FieldMappingsConfig,
   zohoOrderFieldNames,
@@ -25,10 +26,13 @@ export interface ZohoConfig {
   // The tenant's field mappings, so the fetch can request exactly the fields
   // the mapper consumes (instead of the first 50 the module happens to return).
   fieldMappings?: FieldMappingsConfig;
+  // API names of the order fields the DEP outcome is written back to.
+  depStatusField?: string; // default 'DEP_Status'
+  depResponseField?: string; // default 'DEP_Response'
 }
 
 @Injectable()
-export class ZohoAdapter implements DataSourcePort {
+export class ZohoAdapter implements DataSourcePort, ErpOrderWriteback {
   private readonly logger = new Logger(ZohoAdapter.name);
   private config: ZohoConfig | null = null;
   private accessToken: string | null = null;
@@ -104,6 +108,45 @@ export class ZohoAdapter implements DataSourcePort {
     } catch (error) {
       this.logger.error(`Connection test failed: ${error}`);
       return false;
+    }
+  }
+
+  /**
+   * Push a resolved DEP outcome back to the Zoho order record. Writes the
+   * status/response field pair via PUT (same contract as the client-api
+   * manual push). Requires the token to hold a write scope
+   * (ZohoCRM.modules.salesorders.UPDATE); throws on failure.
+   */
+  async updateOrderDepStatus(
+    externalOrderId: string,
+    depResponse: string,
+    depStatus: string,
+  ): Promise<void> {
+    this.ensureConfigured();
+    const token = await this.getAccessToken();
+    const statusField = this.config!.depStatusField || 'DEP_Status';
+    const responseField = this.config!.depResponseField || 'DEP_Response';
+
+    const resp = await fetch(
+      `${this.config!.apiDomain}/crm/v3/${this.config!.ordersModule}/${externalOrderId}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: [{ [statusField]: depStatus, [responseField]: depResponse.slice(0, 1000) }],
+        }),
+      },
+    );
+
+    const body = (await resp.json().catch(() => null)) as
+      | { data?: { status?: string; message?: string }[] }
+      | null;
+    const recordResult = body?.data?.[0];
+    if (!resp.ok || recordResult?.status === 'error') {
+      throw new Error(`Zoho update failed: ${recordResult?.message || `HTTP ${resp.status}`}`);
     }
   }
 

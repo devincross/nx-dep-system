@@ -20,6 +20,10 @@ const ZOHO_DATA_CENTERS: Record<string, ZohoDataCenter> = {
 const DEFAULT_SCOPES = [
   'ZohoCRM.modules.accounts.READ',
   'ZohoCRM.modules.salesorders.READ',
+  // Required to write the DEP outcome (status/response) back to the order
+  // record. Without it the write-back PUT is rejected with an OAuth scope
+  // mismatch. Existing connections must reconnect to obtain the new scope.
+  'ZohoCRM.modules.salesorders.UPDATE',
   // Required to read field metadata (/settings/fields) so the Get Records
   // `fields` list can be resolved. Without it, field resolution falls back to
   // `id` only and records come back with no usable data.
