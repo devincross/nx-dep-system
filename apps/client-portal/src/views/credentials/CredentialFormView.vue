@@ -527,12 +527,29 @@ function resetMappingsToDefaults() {
 }
 
 onMounted(() => {
+  // Returning from an in-place reconnect (existing credential): the server
+  // already swapped the tokens, so just confirm it to the user.
+  if (route.query.reconnected && isEdit.value) {
+    successMessage.value = 'Zoho reconnected — a fresh token was saved. Your field mappings and settings were kept.';
+  }
+
   const oauthResult = sessionStorage.getItem('zoho_oauth_result');
   if (oauthResult) {
-    const result = JSON.parse(oauthResult) as { refresh_token: string; api_domain: string };
+    const result = JSON.parse(oauthResult) as {
+      refresh_token: string;
+      api_domain: string;
+      client_id?: string;
+      client_secret?: string;
+      data_center?: string;
+    };
     sessionStorage.removeItem('zoho_oauth_result');
     if (!isEdit.value) type.value = 'zoho';
+    // Defer past the type-change watcher (which resets connectionData) so the
+    // restored Client ID/Secret and tokens survive.
     setTimeout(() => {
+      if (result.client_id) connectionData.value['client_id'] = result.client_id;
+      if (result.client_secret) connectionData.value['client_secret'] = result.client_secret;
+      if (result.data_center) zohoDataCenter.value = result.data_center;
       connectionData.value['refresh_token'] = result.refresh_token;
       if (result.api_domain) connectionData.value['api_domain'] = result.api_domain;
       zohoConnected.value = true;
@@ -762,10 +779,14 @@ onMounted(() => {
               <v-col cols="12" md="6">
                 <v-card variant="outlined" class="pa-4 h-100">
                   <div class="text-subtitle-2 mb-2">Option 1: Connect Directly (Recommended)</div>
-                  <div class="text-body-2 text-grey mb-3">You will be redirected to Zoho to authorize access. The connection is set up automatically.</div>
-                  <v-btn color="primary" variant="outlined" :loading="zohoConnectLoading" :disabled="zohoConnected" @click="connectToZoho" block>
+                  <div class="text-body-2 text-grey mb-3">
+                    {{ isEdit
+                      ? 'Re-authorize with Zoho to refresh the token. Your field mappings and other settings are kept.'
+                      : 'You will be redirected to Zoho to authorize access. The connection is set up automatically.' }}
+                  </div>
+                  <v-btn color="primary" variant="outlined" :loading="zohoConnectLoading" :disabled="zohoConnected && !isEdit" @click="connectToZoho" block>
                     <v-icon start>mdi-open-in-new</v-icon>
-                    {{ zohoConnected ? 'Connected' : 'Connect to Zoho' }}
+                    {{ isEdit ? 'Reconnect to Zoho' : (zohoConnected ? 'Connected' : 'Connect to Zoho') }}
                   </v-btn>
                 </v-card>
               </v-col>
@@ -775,11 +796,11 @@ onMounted(() => {
                   <div class="text-body-2 text-grey mb-3">
                     If the redirect option does not work, generate a grant token in your <a href="https://api-console.zoho.com/" target="_blank" rel="noopener">Zoho API Console</a> (Self Client) and paste it below.
                   </div>
-                  <v-btn v-if="!showGrantTokenFlow" color="primary" variant="outlined" :disabled="zohoConnected" @click="showGrantTokenFlow = true" block>
+                  <v-btn v-if="!showGrantTokenFlow" color="primary" variant="outlined" :disabled="zohoConnected && !isEdit" @click="showGrantTokenFlow = true" block>
                     <v-icon start>mdi-key-variant</v-icon>
-                    {{ zohoConnected ? 'Connected' : 'Use Grant Token' }}
+                    {{ isEdit ? 'Use Grant Token' : (zohoConnected ? 'Connected' : 'Use Grant Token') }}
                   </v-btn>
-                  <template v-if="showGrantTokenFlow && !zohoConnected">
+                  <template v-if="showGrantTokenFlow && (!zohoConnected || isEdit)">
                     <v-text-field v-model="grantToken" label="Grant Token" placeholder="1000.abc123..." density="compact" variant="outlined" class="mb-2" hint="This token expires in 2-3 minutes. Make sure to use these scopes when generating it: ZohoCRM.modules.accounts.READ, ZohoCRM.modules.salesorders.READ, ZohoCRM.settings.fields.READ" persistent-hint></v-text-field>
                     <v-btn color="primary" :loading="grantTokenLoading" @click="exchangeGrantToken" block size="small">Connect with Token</v-btn>
                   </template>

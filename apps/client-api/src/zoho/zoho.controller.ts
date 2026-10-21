@@ -3,7 +3,9 @@ import {
   Get,
   Post,
   Body,
+  Param,
   Query,
+  ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
@@ -44,6 +46,24 @@ class ExchangeCodeDto {
   @IsString()
   @IsNotEmpty()
   client_secret!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  redirect_uri!: string;
+
+  @IsOptional()
+  @IsString()
+  accounts_server?: string;
+
+  @IsOptional()
+  @IsString()
+  data_center?: string;
+}
+
+class ReconnectDto {
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -168,6 +188,26 @@ export class ZohoController {
       refresh_token: result.refresh_token,
       api_domain: result.api_domain,
     };
+  }
+
+  /**
+   * Re-authorize an existing Zoho credential in place: exchange a fresh OAuth
+   * code for new tokens and write them onto the credential, preserving its
+   * field_mappings and other settings. Avoids having to create a new
+   * credential (which loses the mappings).
+   */
+  @Post('credentials/:id/reconnect')
+  async reconnect(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ReconnectDto,
+  ) {
+    return this.zohoService.reconnect(tenant.db, id, {
+      code: body.code,
+      redirectUri: body.redirect_uri,
+      accountsServer: body.accounts_server,
+      dataCenter: body.data_center,
+    });
   }
 
   /**

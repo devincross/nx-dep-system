@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantDb } from '@org/database';
 import { CredentialsService, DecryptedCredential } from '../credentials/credentials.service.js';
+import { ZohoOAuthService } from './zoho-oauth.service.js';
 import {
   zohoOrderFieldNames,
   zohoAccountFieldNames,
@@ -40,7 +41,10 @@ const MAX_FIELDS = 50;
 export class ZohoService {
   private readonly logger = new Logger(ZohoService.name);
 
-  constructor(private readonly credentialsService: CredentialsService) {}
+  constructor(
+    private readonly credentialsService: CredentialsService,
+    private readonly zohoOAuthService: ZohoOAuthService,
+  ) {}
 
   /**
    * Get the newest active Zoho credential for the tenant.
@@ -53,6 +57,58 @@ export class ZohoService {
     }
 
     return credential;
+  }
+
+  /**
+   * Re-authorize an EXISTING Zoho credential: exchange a fresh OAuth code for
+   * new tokens and write them back onto the same credential row, preserving
+   * everything else (field_mappings, modules, client_id/secret).
+   *
+   * This is the robust alternative to creating a brand-new credential after a
+   * re-auth — which drops the field mappings and silently reintroduces the
+   * serial-field bug. The client never re-sends secrets: the stored
+   * client_id/client_secret are used for the exchange.
+   */
+  async reconnect(
+    db: TenantDb,
+    credentialId: number,
+    params: { code: string; redirectUri: string; accountsServer?: string; dataCenter?: string },
+  ): Promise<{ ok: true; api_domain?: string }> {
+    const credential = await this.credentialsService.findOne(db, credentialId);
+    if (credential.type !== 'zoho') {
+      throw new BadRequestException('Credential is not a Zoho connection');
+    }
+
+    const conn = credential.connectionData as Record<string, unknown>;
+    const clientId = conn['client_id'] as string | undefined;
+    const clientSecret = conn['client_secret'] as string | undefined;
+    if (!clientId || !clientSecret) {
+      throw new BadRequestException(
+        'This Zoho credential has no stored Client ID/Secret to re-authorize with.',
+      );
+    }
+
+    const tokens = await this.zohoOAuthService.exchangeCodeForTokens({
+      code: params.code,
+      clientId,
+      clientSecret,
+      redirectUri: params.redirectUri,
+      accountsServer: params.accountsServer,
+      dataCenter: params.dataCenter,
+    });
+
+    // Merge new tokens over the existing connection data — field_mappings and
+    // every other setting are carried through untouched.
+    const merged: Record<string, unknown> = {
+      ...conn,
+      refresh_token: tokens.refresh_token,
+    };
+    if (tokens.api_domain) merged['api_domain'] = tokens.api_domain;
+
+    await this.credentialsService.update(db, credentialId, { connectionData: merged });
+    this.logger.log(`Reconnected Zoho credential ${credentialId} (tokens refreshed, settings preserved)`);
+
+    return { ok: true, api_domain: tokens.api_domain };
   }
 
   /**
