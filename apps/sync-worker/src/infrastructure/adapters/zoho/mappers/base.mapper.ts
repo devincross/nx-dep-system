@@ -31,8 +31,9 @@ export class ZohoBaseMapper implements MapperPort {
    * Map raw Zoho sales order data to OrderEntity
    */
   mapOrder(raw: RawOrderData): OrderEntity {
+    this.assertSerialFieldFetched(raw);
     const items = this.mapOrderItems(raw);
-    
+
     return {
       externalOrderId: String(raw['id'] ?? raw['Id'] ?? raw['SO_Number'] ?? ''),
       externalAccountId: String(
@@ -50,6 +51,30 @@ export class ZohoBaseMapper implements MapperPort {
       depOrderedAt: raw['DEP_Ordered_At'] ? new Date(String(raw['DEP_Ordered_At'])) : undefined,
       depShippedAt: raw['DEP_Shipped_At'] ? new Date(String(raw['DEP_Shipped_At'])) : undefined,
     };
+  }
+
+  /**
+   * Guard against an incomplete fetch silently wiping serials. Zoho returns
+   * every requested field as a present key (null when empty), so a genuinely
+   * empty or fully-returned order still carries a serial field; a record
+   * missing every serial field was never fully fetched (lost field-read
+   * scope, a field-list cap, a rename). Mapping it would read zero serials
+   * and the reconciliation would soft-delete every serial as "removed", so
+   * refuse it instead — the use case counts it errored and leaves the
+   * stored serials intact.
+   */
+  protected assertSerialFieldFetched(raw: RawOrderData): void {
+    const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(raw, key);
+    if (has('Product_Details') || has('Ordered_Items') || has('Serial_Numbers') || has('Serials')) {
+      return;
+    }
+    const orderId = String(raw['id'] ?? raw['Id'] ?? raw['SO_Number'] ?? '(unknown id)');
+    throw new Error(
+      `Zoho order ${orderId} returned without a serial field ` +
+      `(none of Product_Details / Ordered_Items / Serial_Numbers / Serials present). ` +
+      `Refusing to sync an incomplete record so its serials aren't wrongly removed — ` +
+      `check the Zoho token's field-read scope.`,
+    );
   }
 
   /**

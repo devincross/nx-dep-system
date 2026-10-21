@@ -150,6 +150,7 @@ export class DynamicZohoMapper implements MapperPort {
   }
 
   mapOrder(raw: RawOrderData): OrderEntity {
+    this.assertSerialFieldFetched(raw);
     return {
       externalOrderId: resolveFieldPathAsString(raw, this.orderCfg.externalOrderId),
       externalAccountId: resolveFieldPathAsString(raw, this.orderCfg.externalAccountId),
@@ -175,6 +176,40 @@ export class DynamicZohoMapper implements MapperPort {
   }
 
   // ------- private helpers -------
+
+  /**
+   * Guard against an incomplete fetch silently wiping serials.
+   *
+   * Zoho's Get Records returns every requested field as a present key (null
+   * when the order has no value), so a genuinely empty or fully-returned
+   * order still carries the serial field key — only a fetch that never
+   * returned the field at all (lost ZohoCRM.settings.fields.READ scope, a
+   * field-list cap, a renamed field) omits it. If we mapped such a record
+   * we'd read zero serials and the order-item reconciliation would
+   * soft-delete every serial on the order as "removed". Refuse the record
+   * instead: the use case counts it errored (so the run is marked failed and
+   * the incremental watermark doesn't advance) and the stored serials are
+   * left untouched. A present-but-empty serial field still maps normally,
+   * so legitimate full/partial returns continue to remove serials.
+   */
+  private assertSerialFieldFetched(raw: RawOrderData): void {
+    const present = (path: string): boolean =>
+      Object.prototype.hasOwnProperty.call(raw, rootField(path));
+
+    // Serials live either in the subform (sourceField) or a scalar field
+    // (serialNumbers); a healthy record carries whichever the tenant uses.
+    if (present(this.itemsCfg.sourceField) || present(this.itemsCfg.serialNumbers)) {
+      return;
+    }
+
+    const orderId = resolveFieldPathAsString(raw, this.orderCfg.externalOrderId) || '(unknown id)';
+    throw new Error(
+      `Zoho order ${orderId} returned without its serial field ` +
+      `(neither '${this.itemsCfg.sourceField}' nor '${this.itemsCfg.serialNumbers}' was present). ` +
+      `Refusing to sync an incomplete record so its serials aren't wrongly removed — ` +
+      `check the Zoho token's field-read scope and the order field mappings.`,
+    );
+  }
 
   private mapOrderItems(raw: RawOrderData): OrderItemEntity[] {
     const rawItems = resolveFieldPath(raw, this.itemsCfg.sourceField);

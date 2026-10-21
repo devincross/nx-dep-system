@@ -106,9 +106,18 @@ describe('DynamicZohoMapper with custom config', () => {
     ]);
   });
 
-  it('returns empty items when sourceField is missing or not an array', () => {
-    const raw: RawOrderData = { order_num: 'ON-1' };
+  it('returns empty items when the serial field is present but empty', () => {
+    // A genuine empty / fully-returned order: the field is present (Zoho
+    // returns it as null), so it maps to zero items — not an error.
+    const raw: RawOrderData = { order_num: 'ON-1', serial_list: null };
     expect(mapper.mapOrder(raw).items).toEqual([]);
+  });
+
+  it('throws when the record omits the serial field entirely (incomplete fetch)', () => {
+    // Field absent, not empty: the fetch never returned it. Mapping this
+    // would wrongly remove every stored serial, so refuse it.
+    const raw: RawOrderData = { order_num: 'ON-1' };
+    expect(() => mapper.mapOrder(raw)).toThrow(/serial field/i);
   });
 });
 
@@ -155,7 +164,8 @@ describe('DynamicZohoMapper edge cases', () => {
   });
 
   it('handles order with no status, po, or isDep', () => {
-    const raw: RawOrderData = { id: '1', Account_Name: { id: 'A1' } };
+    // Serial_Numbers present-but-empty = a valid order with no serials yet.
+    const raw: RawOrderData = { id: '1', Account_Name: { id: 'A1' }, Serial_Numbers: null };
     const result = mapper.mapOrder(raw);
 
     expect(result.externalOrderStatus).toBeUndefined();
@@ -192,10 +202,12 @@ describe('DynamicZohoMapper edge cases', () => {
   });
 
   it('skips empty serial strings after splitting', () => {
+    // Default mapper reads Serial_Numbers; the field is present (so the fetch
+    // is complete) but contains only delimiters → zero items.
     const raw: RawOrderData = {
       id: '1',
       Account_Name: { id: 'A1' },
-      Apple_Serial_Number: ',,,  , ',
+      Serial_Numbers: ',,,  , ',
     };
     expect(mapper.mapOrder(raw).items).toEqual([]);
   });
