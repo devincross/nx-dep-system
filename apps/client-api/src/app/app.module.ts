@@ -11,6 +11,7 @@ import { AccountsModule } from '../accounts/accounts.module.js';
 import { NetsuiteModule } from '../netsuite/netsuite.module.js';
 import { SyncStatusModule } from '../sync-status/sync-status.module.js';
 import { ZohoModule } from '../zoho/zoho.module.js';
+import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ZohoModule } from '../zoho/zoho.module.js';
     NetsuiteModule,
     ZohoModule,
     SyncStatusModule,
+    ReconciliationModule,
   ],
   controllers: [AppController],
 })

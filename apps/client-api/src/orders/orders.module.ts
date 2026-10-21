@@ -12,6 +12,6 @@ import { NetsuiteModule } from '../netsuite/netsuite.module.js';
   imports: [CredentialsModule, NetsuiteModule],
   controllers: [OrdersController, HistoricalImportController, DepActionsController],
   providers: [OrdersService, HistoricalImportService, DepActionsService],
-  exports: [OrdersService],
+  exports: [OrdersService, DepActionsService],
 })
 export class OrdersModule {}

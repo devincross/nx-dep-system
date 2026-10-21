@@ -1,0 +1,241 @@
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, inArray, like, ne, or, sql } from 'drizzle-orm';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  TenantDb,
+  reconciliationRuns,
+  reconciliationFindings,
+} from '@org/database';
+
+export interface CreateRunOptions {
+  note?: string;
+}
+
+export interface FindingsQuery {
+  page?: number;
+  limit?: number;
+  severity?: 'ok' | 'warn' | 'critical';
+  recommendedAction?: string;
+  onlyMismatches?: boolean;
+  search?: string;
+}
+
+function parseList(json: string | null): string[] | null {
+  if (json === null || json === undefined) return null;
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+@Injectable()
+export class ReconciliationService {
+  /** Create a run. Rejects if one is already active (worker handles one at a time). */
+  async createRun(db: TenantDb, options: CreateRunOptions = {}): Promise<{ runId: string }> {
+    const active = await db
+      .select({ id: reconciliationRuns.id })
+      .from(reconciliationRuns)
+      .where(inArray(reconciliationRuns.status, ['pending', 'running']))
+      .limit(1);
+    if (active.length > 0) {
+      throw new ConflictException('A reconciliation run is already in progress');
+    }
+
+    const runId = uuidv4();
+    const now = new Date();
+    await db.insert(reconciliationRuns).values({
+      runId,
+      status: 'pending',
+      scope: options.note ? JSON.stringify({ note: options.note }) : null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { runId };
+  }
+
+  async getRun(db: TenantDb, runId: string) {
+    const rows = await db
+      .select()
+      .from(reconciliationRuns)
+      .where(eq(reconciliationRuns.runId, runId))
+      .limit(1);
+    const run = rows[0];
+    if (!run) throw new NotFoundException(`Reconciliation run ${runId} not found`);
+    const progress =
+      run.totalOrders && run.totalOrders > 0
+        ? Math.min(1, run.processedOrders / run.totalOrders)
+        : run.status === 'complete'
+          ? 1
+          : 0;
+    return { ...run, progress };
+  }
+
+  async listRuns(db: TenantDb, page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
+    const items = await db
+      .select()
+      .from(reconciliationRuns)
+      .orderBy(desc(reconciliationRuns.id))
+      .limit(limit)
+      .offset(offset);
+    const [{ total }] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(reconciliationRuns);
+    return { items, total: Number(total), page, limit };
+  }
+
+  async listFindings(db: TenantDb, runId: string, q: FindingsQuery) {
+    const page = q.page && q.page > 0 ? q.page : 1;
+    const limit = q.limit && q.limit > 0 ? Math.min(q.limit, 500) : 50;
+    const offset = (page - 1) * limit;
+
+    const conds = [eq(reconciliationFindings.runId, runId)];
+    if (q.severity) conds.push(eq(reconciliationFindings.severity, q.severity));
+    if (q.recommendedAction) {
+      conds.push(eq(reconciliationFindings.recommendedAction, q.recommendedAction as never));
+    }
+    if (q.onlyMismatches) conds.push(ne(reconciliationFindings.severity, 'ok'));
+    if (q.search) {
+      const term = `%${q.search}%`;
+      const match = or(
+        like(reconciliationFindings.orderNumber, term),
+        like(reconciliationFindings.externalOrderId, term),
+      );
+      if (match) conds.push(match);
+    }
+    const where = and(...conds);
+
+    const rows = await db
+      .select()
+      .from(reconciliationFindings)
+      .where(where)
+      .orderBy(desc(reconciliationFindings.severity), reconciliationFindings.orderId)
+      .limit(limit)
+      .offset(offset);
+
+    const [{ total }] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(reconciliationFindings)
+      .where(where);
+
+    const items = rows.map((r) => ({
+      id: r.id,
+      orderId: r.orderId,
+      orderNumber: r.orderNumber,
+      externalOrderId: r.externalOrderId,
+      ourDevices: parseList(r.ourDevices) ?? [],
+      zohoDevices: parseList(r.zohoDevices),
+      appleDevices: parseList(r.appleDevices),
+      zohoMatch: r.zohoMatch,
+      appleMatch: r.appleMatch,
+      zohoAdded: parseList(r.zohoAdded) ?? [],
+      zohoRemoved: parseList(r.zohoRemoved) ?? [],
+      zohoCorrectionApplied: r.zohoCorrectionApplied,
+      missingFromApple: parseList(r.missingFromApple) ?? [],
+      extraInApple: parseList(r.extraInApple) ?? [],
+      recommendedAction: r.recommendedAction,
+      severity: r.severity,
+    }));
+
+    return { items, total: Number(total), page, limit };
+  }
+
+  /** Full findings for a run as a CSV string (no external calls). */
+  async exportCsv(db: TenantDb, runId: string): Promise<string> {
+    const rows = await db
+      .select()
+      .from(reconciliationFindings)
+      .where(eq(reconciliationFindings.runId, runId))
+      .orderBy(reconciliationFindings.orderId);
+
+    const header = [
+      'order_number',
+      'external_order_id',
+      'severity',
+      'recommended_action',
+      'our_devices',
+      'zoho_devices',
+      'apple_devices',
+      'zoho_match',
+      'apple_match',
+      'zoho_correction_applied',
+      'zoho_added',
+      'zoho_removed',
+      'missing_from_apple',
+      'extra_in_apple',
+    ];
+    const esc = (v: unknown) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const joinList = (json: string | null) => (parseList(json) ?? []).join(' ');
+
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push(
+        [
+          esc(r.orderNumber),
+          esc(r.externalOrderId),
+          esc(r.severity),
+          esc(r.recommendedAction),
+          esc(joinList(r.ourDevices)),
+          esc(r.zohoDevices === null ? '' : joinList(r.zohoDevices)),
+          esc(r.appleDevices === null ? '' : joinList(r.appleDevices)),
+          esc(r.zohoMatch),
+          esc(r.appleMatch),
+          esc(r.zohoCorrectionApplied),
+          esc(joinList(r.zohoAdded)),
+          esc(joinList(r.zohoRemoved)),
+          esc(joinList(r.missingFromApple)),
+          esc(joinList(r.extraInApple)),
+        ].join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
+  /** Put a stalled/errored/paused run back into the queue; keeps the cursor. */
+  async resume(db: TenantDb, runId: string) {
+    const run = await this.getRun(db, runId);
+    if (run.status === 'complete' || run.status === 'canceled') {
+      throw new ConflictException(`Run ${runId} is ${run.status} and cannot be resumed`);
+    }
+    await db
+      .update(reconciliationRuns)
+      .set({ status: 'pending', error: null, updatedAt: new Date() })
+      .where(eq(reconciliationRuns.runId, runId));
+    return { runId, status: 'pending' as const };
+  }
+
+  async cancel(db: TenantDb, runId: string) {
+    await this.getRun(db, runId);
+    await db
+      .update(reconciliationRuns)
+      .set({ status: 'canceled', updatedAt: new Date() })
+      .where(eq(reconciliationRuns.runId, runId));
+    return { runId, status: 'canceled' as const };
+  }
+
+  /** ov_restore candidate findings for the remediation step. */
+  async getRemediationCandidates(db: TenantDb, runId: string, limit: number) {
+    const rows = await db
+      .select()
+      .from(reconciliationFindings)
+      .where(
+        and(
+          eq(reconciliationFindings.runId, runId),
+          eq(reconciliationFindings.recommendedAction, 'ov_restore'),
+        ),
+      )
+      .orderBy(reconciliationFindings.orderId)
+      .limit(limit);
+    return rows.map((r) => ({
+      orderId: r.orderId,
+      orderNumber: r.orderNumber,
+      externalOrderId: r.externalOrderId,
+      missingFromApple: parseList(r.missingFromApple) ?? [],
+    }));
+  }
+}

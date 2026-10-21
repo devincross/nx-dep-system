@@ -311,3 +311,132 @@ export interface SyncSummary {
   };
 }
 
+// Reconciliation types
+export type ReconciliationRunStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'complete'
+  | 'error'
+  | 'canceled';
+
+export type RecommendedAction =
+  | 'none'
+  | 'ov_restore'
+  | 'investigate'
+  | 'not_in_apple'
+  | 'not_in_zoho';
+
+export type FindingSeverity = 'ok' | 'warn' | 'critical';
+
+export interface ReconciliationRun {
+  runId: string;
+  status: ReconciliationRunStatus;
+  cursorOrderId: number;
+  totalOrders: number | null;
+  processedOrders: number;
+  zohoCorrectedCount: number;
+  zohoMismatchCount: number;
+  appleMatchCount: number;
+  missingFromAppleCount: number;
+  extraInAppleCount: number;
+  criticalCount: number;
+  errorOrderCount: number;
+  zohoIndexedAt: string | null;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  progress: number;
+}
+
+export interface ReconciliationFinding {
+  id: number;
+  orderId: number;
+  orderNumber: string;
+  externalOrderId: string | null;
+  ourDevices: string[];
+  zohoDevices: string[] | null;
+  appleDevices: string[] | null;
+  zohoMatch: boolean | null;
+  appleMatch: boolean | null;
+  zohoAdded: string[];
+  zohoRemoved: string[];
+  zohoCorrectionApplied: boolean;
+  missingFromApple: string[];
+  extraInApple: string[];
+  recommendedAction: RecommendedAction;
+  severity: FindingSeverity;
+}
+
+export interface ReconciliationRunsPage {
+  items: ReconciliationRun[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ReconciliationFindingsParams {
+  page: number;
+  limit: number;
+  severity?: FindingSeverity;
+  recommendedAction?: RecommendedAction;
+  onlyMismatches?: boolean;
+  search?: string;
+}
+
+export interface ReconciliationFindingsPage {
+  items: ReconciliationFinding[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CreateReconciliationRunResponse {
+  runId: string;
+}
+
+export interface ReconciliationActionResponse {
+  runId: string;
+  status: ReconciliationRunStatus;
+}
+
+export interface RemediateParams {
+  dryRun?: boolean;
+  limit?: number;
+  chunkSize?: number;
+}
+
+export interface RemediateDryRunOrder {
+  orderId: number;
+  orderNumber: string;
+  deviceCount: number;
+  devices: string[];
+}
+
+export interface RemediateDryRunResult {
+  runId: string;
+  candidateCount: number;
+  dryRun: true;
+  eligible: number;
+  skipped: { orderId: number; reason: string }[];
+  chunkSize: number;
+  chunkCount: number;
+  orders: RemediateDryRunOrder[];
+}
+
+export interface RemediateExecuteResult {
+  runId: string;
+  candidateCount: number;
+  dryRun: false;
+  submitted: number;
+  failed: number;
+  skipped: number;
+  chunkCount: number;
+  chunks: number;
+  errors: unknown[];
+}
+
+export type RemediateResult = RemediateDryRunResult | RemediateExecuteResult;
+

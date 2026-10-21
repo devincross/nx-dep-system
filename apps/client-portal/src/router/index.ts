@@ -93,6 +93,13 @@ const router = createRouter({
       component: () => import('../views/ZohoView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true },
     },
+    // Reconciliation route (admin only)
+    {
+      path: '/reconciliation',
+      name: 'reconciliation',
+      component: () => import('../views/reconciliation/ReconciliationView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
     // User management (admin only)
     {
       path: '/users',

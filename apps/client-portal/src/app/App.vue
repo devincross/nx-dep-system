@@ -37,6 +37,7 @@ const menuItems = computed(() => {
     } else if (tenantStore.connectionType === 'zoho') {
       items.push({ title: 'Zoho', icon: 'mdi-cloud-sync', to: '/zoho' });
     }
+    items.push({ title: 'Reconciliation', icon: 'mdi-compare-horizontal', to: '/reconciliation' });
     items.push({ title: 'Users', icon: 'mdi-account-cog', to: '/users' });
   }
   return items;

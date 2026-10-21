@@ -9,6 +9,7 @@ import { PushChangesService } from './push-changes.service.js';
 // Application layer
 import { SyncAccountsUseCase, SyncOrdersUseCase, PushChangesUseCase } from '../application/index.js';
 import { DepPushChangesUseCase } from '../application/dep-push-changes.use-case.js';
+import { ReconcileRunUseCase } from '../application/reconcile-run.use-case.js';
 
 // Infrastructure layer
 import { MapperRegistry } from '../infrastructure/adapters/mapper-registry.js';
@@ -25,11 +26,13 @@ import {
   OrderChangeRepository,
 } from '../infrastructure/repositories/index.js';
 import { DepTransactionRepository } from '../infrastructure/repositories/dep-transaction.repository.js';
+import { ReconciliationRepository } from '../infrastructure/repositories/reconciliation.repository.js';
 
 // Schedulers
 import { SyncScheduler } from '../scheduler/sync.scheduler.js';
 import { DepPollScheduler } from '../scheduler/dep-poll.scheduler.js';
 import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
+import { ReconciliationScheduler } from '../scheduler/reconciliation.scheduler.js';
 
 @Module({
   imports: [ScheduleModule.forRoot()],
@@ -42,6 +45,7 @@ import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
     SyncOrdersUseCase,
     PushChangesUseCase,
     DepPushChangesUseCase,
+    ReconcileRunUseCase,
     // Adapters
     MapperRegistry,
     NetsuiteAdapter,
@@ -58,10 +62,12 @@ import { DepPushScheduler } from '../scheduler/dep-push.scheduler.js';
     SyncStatusRepository,
     OrderChangeRepository,
     DepTransactionRepository,
+    ReconciliationRepository,
     // Schedulers
     SyncScheduler,
     DepPollScheduler,
     DepPushScheduler,
+    ReconciliationScheduler,
   ],
 })
 export class AppModule implements OnModuleInit {
