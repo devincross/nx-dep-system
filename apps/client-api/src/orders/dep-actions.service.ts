@@ -190,7 +190,7 @@ export class DepActionsService {
     const now = this.formatDate(new Date());
 
     const request = this.buildBulkEnrollRequest(cred, txnId, [
-      this.buildOverrideEntry(order, depItems, resolvedCustomerId, now),
+      this.buildRemediationEntry(order, depItems, resolvedCustomerId, now, 'OV'),
     ]);
 
     const response = await this.callDep(cred, '/enroll-service/1.0/bulk-enroll-devices', request);
@@ -198,22 +198,29 @@ export class DepActionsService {
     return { transactionId: txnId, response, ...this.submissionOutcome(response) };
   }
 
-  /** Build a single OV order entry for a bulk-enroll request. Shared by the
-   * single-order override and the batched remediation path. */
-  private buildOverrideEntry(
+  /**
+   * Build a single order entry for a bulk-enroll request. action 'OV' overrides
+   * an order Apple still has (delivery 'SELF'); 'OR' enrolls an order Apple no
+   * longer has (delivery 'DEL_…'). Apple rejects OR on an existing order header
+   * with DEP-ERR-OR-4110, so the caller must pick OV vs OR by whether the order
+   * is still in Apple.
+   */
+  private buildRemediationEntry(
     order: typeof orders.$inferSelect,
     depItems: (typeof orderItems.$inferSelect)[],
     resolvedCustomerId: string,
     now: string,
+    action: 'OR' | 'OV',
   ) {
+    const orderNumber = order.depOrderId || order.externalOrderId || String(order.id);
     return {
-      orderNumber: order.depOrderId || order.externalOrderId || String(order.id),
+      orderNumber,
       orderDate: order.depOrderedAt ? this.formatDate(order.depOrderedAt) : now,
-      orderType: 'OV',
+      orderType: action,
       customerId: resolvedCustomerId,
       poNumber: order.po || undefined,
       deliveries: [{
-        deliveryNumber: 'SELF',
+        deliveryNumber: action === 'OV' ? 'SELF' : `DEL_${orderNumber}`,
         shipDate: order.depShippedAt ? this.formatDate(order.depShippedAt) : now,
         devices: depItems.map((i) => ({ deviceId: i.serialNumber })),
       }],
@@ -221,18 +228,20 @@ export class DepActionsService {
   }
 
   /**
-   * Batched DEP Override for reconciliation remediation. Re-pushes the correct
-   * device list to Apple for many orders, chunked into one bulk-enroll request
-   * per chunk so Apple processes them faster than one call per order.
+   * Batched DEP remediation for reconciliation. Per order it sends OV (override,
+   * for orders Apple still has) or OR (enroll, for orders Apple no longer has),
+   * chunked into one bulk-enroll request per chunk (orders of mixed type are
+   * fine — each entry carries its own orderType) so Apple processes them faster
+   * than one call per order.
    *
-   * dryRun (default true at the controller) returns exactly what WOULD be sent
-   * — no Apple call — so the operator can review before executing. On execute,
-   * one dep_transactions row is logged per order (sharing the chunk's Apple
-   * transaction id) so the existing poll scheduler resolves each order's outcome.
+   * dryRun (default true at the controller) returns exactly what WOULD be sent —
+   * no Apple call. On execute, one dep_transactions row is logged per order
+   * (sharing the chunk's Apple transaction id) so the poll scheduler resolves
+   * each order's outcome.
    */
-  async batchOverrideOrders(
+  async batchRemediate(
     db: TenantDb,
-    orderIds: number[],
+    candidates: { orderId: number; action: 'OR' | 'OV' }[],
     opts: { dryRun: boolean; chunkSize?: number },
   ) {
     const chunkSize = Math.min(Math.max(opts.chunkSize ?? 50, 1), 100);
@@ -242,34 +251,38 @@ export class DepActionsService {
       order: typeof orders.$inferSelect;
       depItems: (typeof orderItems.$inferSelect)[];
       resolvedCustomerId: string;
+      action: 'OR' | 'OV';
     }[] = [];
     const skipped: { orderId: number; reason: string }[] = [];
 
-    for (const orderId of orderIds) {
+    for (const c of candidates) {
       try {
-        const { order, items, resolvedCustomerId } = await this.loadOrderAndCreds(db, orderId);
+        const { order, items, resolvedCustomerId } = await this.loadOrderAndCreds(db, c.orderId);
         const depItems = items.filter((i) => i.isDep && !i.deletedAt);
         if (depItems.length === 0) {
-          skipped.push({ orderId, reason: 'No DEP-eligible devices' });
+          skipped.push({ orderId: c.orderId, reason: 'No DEP-eligible devices' });
           continue;
         }
-        prepared.push({ orderId, order, depItems, resolvedCustomerId });
+        prepared.push({ orderId: c.orderId, order, depItems, resolvedCustomerId, action: c.action });
       } catch (err) {
-        skipped.push({ orderId, reason: err instanceof Error ? err.message : String(err) });
+        skipped.push({ orderId: c.orderId, reason: err instanceof Error ? err.message : String(err) });
       }
     }
 
     if (opts.dryRun) {
       return {
         dryRun: true,
-        totalCandidates: orderIds.length,
+        totalCandidates: candidates.length,
         eligible: prepared.length,
+        overrides: prepared.filter((p) => p.action === 'OV').length,
+        enrolls: prepared.filter((p) => p.action === 'OR').length,
         skipped,
         chunkSize,
         chunkCount: Math.ceil(prepared.length / chunkSize),
         orders: prepared.map((p) => ({
           orderId: p.orderId,
           orderNumber: p.order.depOrderId || p.order.externalOrderId || String(p.order.id),
+          action: p.action,
           deviceCount: p.depItems.length,
           devices: p.depItems.map((i) => i.serialNumber),
         })),
@@ -294,7 +307,7 @@ export class DepActionsService {
       const txnId = uuidv4().replace(/-/g, '').slice(0, 20);
       const now = this.formatDate(new Date());
       const entries = slice.map((p) =>
-        this.buildOverrideEntry(p.order, p.depItems, p.resolvedCustomerId, now),
+        this.buildRemediationEntry(p.order, p.depItems, p.resolvedCustomerId, now, p.action),
       );
       const request = this.buildBulkEnrollRequest(cred, txnId, entries);
 
@@ -305,9 +318,9 @@ export class DepActionsService {
         for (const p of slice) {
           const perTxnId = uuidv4().replace(/-/g, '').slice(0, 20);
           const perRequest = this.buildBulkEnrollRequest(cred, perTxnId, [
-            this.buildOverrideEntry(p.order, p.depItems, p.resolvedCustomerId, now),
+            this.buildRemediationEntry(p.order, p.depItems, p.resolvedCustomerId, now, p.action),
           ]);
-          await this.logTransaction(db, p.orderId, perTxnId, 'OV', perRequest, response);
+          await this.logTransaction(db, p.orderId, perTxnId, p.action, perRequest, response);
         }
         const outcome = this.submissionOutcome(response);
         const deviceEnrollmentTransactionId = (response as any).deviceEnrollmentTransactionId ?? null;

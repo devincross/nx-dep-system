@@ -209,11 +209,11 @@ export class ReconciliationController {
       runId,
       body.limit ?? 5000,
     );
-    const orderIds = candidates.map((c) => c.orderId);
-    const result = await this.depActionsService.batchOverrideOrders(tenant.db, orderIds, {
-      dryRun,
-      chunkSize: body.chunkSize,
-    });
+    const result = await this.depActionsService.batchRemediate(
+      tenant.db,
+      candidates.map((c) => ({ orderId: c.orderId, action: c.action })),
+      { dryRun, chunkSize: body.chunkSize },
+    );
     return { runId, candidateCount: candidates.length, ...result };
   }
 }

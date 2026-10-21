@@ -330,19 +330,32 @@ export class ReconciliationService {
   }
 
   /**
-   * ov_restore candidate findings for the remediation step. Excludes orders
-   * that already have an OV transaction, so chunked `remediate` calls advance
-   * through the backlog instead of re-pushing the same first N (large pushes
-   * must be chunked via `limit` to avoid gateway timeouts).
+   * Remediation candidates: trusted orders (our DB == Zoho) with devices to
+   * restore to Apple, each tagged with the DEP action to use —
+   *   apple_devices IS NULL  → 'OR' (order gone from Apple; enroll)
+   *   otherwise              → 'OV' (order header still in Apple; override —
+   *                                  Apple rejects OR on an existing order with
+   *                                  DEP-ERR-OR-4110).
+   * Excludes orders that already have an OV/OR transaction, so chunked
+   * `remediate` calls advance through the backlog instead of re-pushing the same
+   * first N (large pushes must be chunked via `limit` to avoid gateway timeouts).
    */
   async getRemediationCandidates(db: TenantDb, runId: string, limit: number) {
     const rows = await db
-      .select()
+      .select({
+        orderId: reconciliationFindings.orderId,
+        orderNumber: reconciliationFindings.orderNumber,
+        externalOrderId: reconciliationFindings.externalOrderId,
+        appleDevices: reconciliationFindings.appleDevices,
+      })
       .from(reconciliationFindings)
       .where(
         and(
           eq(reconciliationFindings.runId, runId),
-          eq(reconciliationFindings.recommendedAction, 'ov_restore'),
+          eq(reconciliationFindings.zohoMatch, true),
+          sql`${reconciliationFindings.zohoDevices} is not null and ${reconciliationFindings.zohoDevices} <> '[]'`,
+          // needs restore: order absent from Apple, or missing some devices
+          sql`(${reconciliationFindings.appleDevices} is null or ${reconciliationFindings.missingFromApple} <> '[]')`,
           notExists(
             db
               .select({ one: sql`1` })
@@ -350,7 +363,7 @@ export class ReconciliationService {
               .where(
                 and(
                   eq(depTransactions.orderId, reconciliationFindings.orderId),
-                  eq(depTransactions.orderType, 'OV'),
+                  inArray(depTransactions.orderType, ['OV', 'OR']),
                 ),
               ),
           ),
@@ -362,7 +375,7 @@ export class ReconciliationService {
       orderId: r.orderId,
       orderNumber: r.orderNumber,
       externalOrderId: r.externalOrderId,
-      missingFromApple: parseList(r.missingFromApple) ?? [],
+      action: (r.appleDevices === null ? 'OR' : 'OV') as 'OR' | 'OV',
     }));
   }
 }
