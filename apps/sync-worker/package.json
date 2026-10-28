@@ -92,6 +92,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/schedule": "^5.0.1",
     "@org/database": "workspace:*",
+    "@org/dep": "workspace:*",
     "drizzle-orm": "*",
     "jsonwebtoken": "*",
     "mysql2": "*",

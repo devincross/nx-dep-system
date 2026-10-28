@@ -12,6 +12,7 @@ module.exports = {
   resolve: {
     alias: {
       '@org/database': join(__dirname, '../../libs/database/src/index.ts'),
+      '@org/dep': join(__dirname, '../../libs/dep/src/index.ts'),
     },
   },
   plugins: [
