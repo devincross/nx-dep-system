@@ -225,6 +225,40 @@ describe('OrderChangeRepository', () => {
         externalOrderId: 'EXT-001',
       });
     });
+
+    it('does not throw on a non-JSON changed_fields; drops the bad field and still returns the change', async () => {
+      const poisoned = {
+        id: 42,
+        orderId: 100,
+        changeType: 'updated',
+        changedFields: 'dep-reenroll-override', // bad manual insert — not JSON
+        snapshot: JSON.stringify({ externalOrderId: 'EXT-001' }),
+        syncedAt: null,
+        createdAt: new Date(),
+      };
+      const good = {
+        id: 43,
+        orderId: 101,
+        changeType: 'created',
+        changedFields: null,
+        snapshot: null,
+        syncedAt: null,
+        createdAt: new Date(),
+      };
+
+      mockDb.where
+        .mockResolvedValueOnce([poisoned, good])
+        .mockResolvedValueOnce([]);
+
+      const result = await repository.findUnsyncedChanges();
+
+      // One bad row must not abort the whole batch (which would stall the tenant push).
+      expect(result.orderChanges).toHaveLength(2);
+      expect(result.orderChanges[0].changedFields).toBeUndefined();
+      expect(result.orderChanges[0].snapshot).toEqual({ externalOrderId: 'EXT-001' });
+      expect(result.orderChanges[0].changeType).toBe('updated'); // still processed by type
+      expect(result.orderChanges[1].orderId).toBe(101);
+    });
   });
 
   describe('markOrderChangesSynced', () => {
