@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { eq, isNull, inArray } from 'drizzle-orm';
 import { TenantDb, orderChanges, orderItemChanges } from '@org/database';
 import {
@@ -12,7 +12,27 @@ import {
 
 @Injectable()
 export class OrderChangeRepository implements OrderChangeRepositoryPort {
+  private readonly logger = new Logger(OrderChangeRepository.name);
   private db: TenantDb | null = null;
+
+  /**
+   * Parse a stored JSON column without letting one malformed row abort the whole
+   * push. changed_fields / snapshot are written as JSON, but a bad manual insert
+   * can leave a non-JSON value there; a throwing JSON.parse in findUnsyncedChanges
+   * (which runs before the per-order try/catch) would stall the entire tenant.
+   * On failure we log and drop the field so the change is still processed by type.
+   */
+  private safeParse(value: string | null, field: string, rowId: number): unknown {
+    if (!value) return undefined;
+    try {
+      return JSON.parse(value);
+    } catch {
+      this.logger.warn(
+        `order_changes row ${rowId}: ignoring non-JSON ${field} (${JSON.stringify(value).slice(0, 60)})`,
+      );
+      return undefined;
+    }
+  }
 
   setDb(db: TenantDb): void {
     this.db = db;
@@ -98,8 +118,8 @@ export class OrderChangeRepository implements OrderChangeRepositoryPort {
       .where(isNull(orderItemChanges.syncedAt));
 
     return {
-      orderChanges: orderChangeRows.map(this.toOrderChangeEntity),
-      itemChanges: itemChangeRows.map(this.toItemChangeEntity),
+      orderChanges: orderChangeRows.map((r) => this.toOrderChangeEntity(r)),
+      itemChanges: itemChangeRows.map((r) => this.toItemChangeEntity(r)),
     };
   }
 
@@ -117,8 +137,8 @@ export class OrderChangeRepository implements OrderChangeRepositoryPort {
       .where(eq(orderItemChanges.orderId, orderId));
 
     return {
-      orderChanges: orderChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map(this.toOrderChangeEntity),
-      itemChanges: itemChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map(this.toItemChangeEntity),
+      orderChanges: orderChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map((r) => this.toOrderChangeEntity(r)),
+      itemChanges: itemChangeRows.filter((r: { syncedAt: unknown }) => !r.syncedAt).map((r) => this.toItemChangeEntity(r)),
     };
   }
 
@@ -156,8 +176,8 @@ export class OrderChangeRepository implements OrderChangeRepositoryPort {
       id: row.id,
       orderId: row.orderId,
       changeType: row.changeType,
-      changedFields: row.changedFields ? JSON.parse(row.changedFields) : undefined,
-      snapshot: row.snapshot ? JSON.parse(row.snapshot) : undefined,
+      changedFields: this.safeParse(row.changedFields, 'changedFields', row.id) as OrderChangeEntity['changedFields'],
+      snapshot: this.safeParse(row.snapshot, 'snapshot', row.id) as OrderChangeEntity['snapshot'],
       syncedAt: row.syncedAt ?? undefined,
       createdAt: row.createdAt ?? undefined,
     };
@@ -170,8 +190,8 @@ export class OrderChangeRepository implements OrderChangeRepositoryPort {
       orderItemId: row.orderItemId ?? undefined,
       serialNumber: row.serialNumber,
       changeType: row.changeType,
-      changedFields: row.changedFields ? JSON.parse(row.changedFields) : undefined,
-      snapshot: row.snapshot ? JSON.parse(row.snapshot) : undefined,
+      changedFields: this.safeParse(row.changedFields, 'changedFields', row.id) as OrderItemChangeEntity['changedFields'],
+      snapshot: this.safeParse(row.snapshot, 'snapshot', row.id) as OrderItemChangeEntity['snapshot'],
       syncedAt: row.syncedAt ?? undefined,
       createdAt: row.createdAt ?? undefined,
     };
