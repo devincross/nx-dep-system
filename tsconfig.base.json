@@ -20,7 +20,9 @@
     "baseUrl": ".",
     "paths": {
       "@org/database": ["libs/database/src/index.ts"],
-      "@org/database/*": ["libs/database/src/*"]
+      "@org/database/*": ["libs/database/src/*"],
+      "@org/dep": ["libs/dep/src/index.ts"],
+      "@org/dep/*": ["libs/dep/src/*"]
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   TenantDb,
   recordErpWriteback,
 } from '@org/database';
+import { buildDepErrorMessage } from '@org/dep';
 import { DepSyncAdapter, DepAdapterConfig } from '../infrastructure/adapters/dep/dep-sync.adapter.js';
 import { NetsuiteAdapter } from '../infrastructure/adapters/netsuite/netsuite.adapter.js';
 import { ZohoAdapter } from '../infrastructure/adapters/zoho/zoho.adapter.js';
@@ -175,7 +176,7 @@ export class DepPollScheduler {
                 responsePayload: responseJson,
               });
             } else {
-              const errorMsg = errors.map((e) => `${e.errorCode}: ${e.errorMessage}`).join('; ');
+              const errorMsg = this.extractErrors(response);
               await depTransactionRepo.updateStatus(txn.id, 'error', {
                 responsePayload: responseJson,
                 errorCode: errors[0].errorCode,
@@ -423,19 +424,9 @@ export class DepPollScheduler {
   }
 
   private extractErrors(response: any): string {
-    const messages: string[] = [];
-    for (const order of response.orders ?? []) {
-      for (const delivery of order.deliveries ?? []) {
-        for (const device of delivery.devices ?? []) {
-          if (device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
-            messages.push(
-              `${device.deviceId}: ${device.devicePostStatus} - ${device.devicePostStatusMessage || ''}`,
-            );
-          }
-        }
-      }
-    }
-    return messages.join('; ') || 'Unknown error';
+    // Group the device-level errors (falling back to order/top-level) so the
+    // stored message and the ERP write-back read the same, deduped signal.
+    return buildDepErrorMessage(response);
   }
 
   private async getDepCredentials(db: TenantDb): Promise<DepAdapterConfig | null> {

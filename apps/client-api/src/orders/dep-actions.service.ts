@@ -10,6 +10,7 @@ import {
   depTransactions,
   recordErpWriteback,
 } from '@org/database';
+import { buildDepErrorMessage } from '@org/dep';
 import { CredentialsService } from '../credentials/credentials.service.js';
 import { NetsuiteService } from '../netsuite/netsuite.service.js';
 import type { TenantContext } from '../tenant/tenant-context.service.js';
@@ -856,55 +857,9 @@ export class DepActionsService {
   }
 
   private extractAnyErrorMessage(response: any): string {
-    const messages: string[] = [];
-
-    // Top-level error
-    if (response.errorMessage) {
-      messages.push(
-        response.errorCode ? `${response.errorCode}: ${response.errorMessage}` : response.errorMessage,
-      );
-    }
-
-    // Array-of-errors variant
-    if (Array.isArray(response.checkTransactionErrorResponse)) {
-      for (const e of response.checkTransactionErrorResponse) {
-        if (e?.errorMessage || e?.errorCode) {
-          messages.push(`${e.errorCode ?? ''}: ${e.errorMessage ?? ''}`.replace(/^: /, ''));
-        }
-      }
-    }
-
-    // enrollDeviceErrorResponse — appears on enroll failures echoed back via status check
-    const ede = response.enrollDeviceErrorResponse;
-    if (ede?.errorMessage || ede?.errorCode) {
-      messages.push(`${ede.errorCode ?? ''}: ${ede.errorMessage ?? ''}`.replace(/^: /, ''));
-    }
-
-    // Per-order errors
-    for (const order of response.orders ?? []) {
-      if (Array.isArray(order.orderErrorMessages)) {
-        for (const m of order.orderErrorMessages) {
-          messages.push(typeof m === 'string' ? m : JSON.stringify(m));
-        }
-      }
-      // Per-device errors
-      for (const delivery of order.deliveries ?? []) {
-        for (const device of delivery.devices ?? []) {
-          if (device.devicePostStatus && device.devicePostStatus !== 'COMPLETE') {
-            messages.push(
-              `${device.deviceId}: ${device.devicePostStatus} - ${device.devicePostStatusMessage || ''}`,
-            );
-          }
-        }
-      }
-    }
-
-    // Fallback to a trimmed snippet of the full response so the user can see SOMETHING
-    if (messages.length === 0) {
-      return `No structured error fields; raw response: ${JSON.stringify(response).slice(0, 400)}`;
-    }
-
-    return messages.join('; ');
+    // Same grouped device-level (then order/top-level) message the poll
+    // scheduler stores and pushes to the ERP, so manual and cron agree.
+    return buildDepErrorMessage(response);
   }
 
   /**
@@ -1415,7 +1370,7 @@ export class DepActionsService {
       await this.pushDepStatusToErp(
         db,
         rows[0]?.externalOrderId,
-        resp.errorMessage || resp.errorCode || 'Apple DEP rejected the submission',
+        buildDepErrorMessage(resp),
         'Error',
       );
     }

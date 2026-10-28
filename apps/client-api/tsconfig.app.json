@@ -8,7 +8,11 @@
     "emitDecoratorMetadata": true,
     "target": "es2021"
   },
-  "include": ["src/**/*.ts", "../../libs/database/src/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "../../libs/database/src/**/*.ts",
+    "../../libs/dep/src/**/*.ts"
+  ],
   "exclude": [
     "out-tsc",
     "dist",
@@ -21,6 +25,9 @@
     "eslint.config.mjs"
   ],
   "references": [
+    {
+      "path": "../../libs/dep"
+    },
     {
       "path": "../../libs/database"
     }
