@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 COPY apps/client-api/package.json ./apps/client-api/
 COPY libs/database/package.json ./libs/database/
+COPY libs/dep/package.json ./libs/dep/
 
 # Install pnpm and dependencies
 RUN npm install -g pnpm@9 && pnpm install --frozen-lockfile
@@ -14,6 +15,7 @@ RUN npm install -g pnpm@9 && pnpm install --frozen-lockfile
 # Copy all source code needed for build
 COPY apps/client-api/ ./apps/client-api/
 COPY libs/database/ ./libs/database/
+COPY libs/dep/ ./libs/dep/
 COPY tsconfig.base.json ./
 COPY tsconfig.json ./
 COPY nx.json ./
