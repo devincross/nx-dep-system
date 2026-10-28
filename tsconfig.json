@@ -26,6 +26,9 @@
     },
     {
       "path": "./apps/sync-worker"
+    },
+    {
+      "path": "./libs/dep"
     }
   ]
 }
