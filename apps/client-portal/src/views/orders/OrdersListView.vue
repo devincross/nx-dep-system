@@ -33,14 +33,17 @@ const selectedOrders = ref<number[]>([]);
 // Bulk enroll-pending state
 const enrollingPending = ref(false);
 
-// Server-side sort state
-const sortBy = ref<string | undefined>(undefined);
-const sortDir = ref<'asc' | 'desc' | undefined>(undefined);
+// Server-side sort state — default to most-recently-changed first.
+const sortBy = ref<string | undefined>('lastUpdated');
+const sortDir = ref<'asc' | 'desc' | undefined>('desc');
+const tableSortBy = ref<{ key: string; order: 'asc' | 'desc' }[]>([
+  { key: 'lastUpdated', order: 'desc' },
+]);
 
 const orderStatuses: OrderStatus[] = ['waiting', 'pending', 'submitted', 'complete', 'error', 'changes'];
 
-// Pagination + search happen server-side (searches all records, not just
-// the loaded page), so column sorting is disabled — newest first.
+// Pagination, search and sorting all happen server-side (across all records,
+// not just the loaded page). Default sort is Last Updated, newest first.
 const headers = [
   { title: 'ID', key: 'id', sortable: true },
   { title: 'Order ID', key: 'orderId', sortable: true },
@@ -51,6 +54,7 @@ const headers = [
   { title: 'Serials', key: 'serials', sortable: false },
   { title: 'DEP', key: 'depOrderId', sortable: true },
   { title: 'Created', key: 'createdAt', sortable: true },
+  { title: 'Last Updated', key: 'lastUpdated', sortable: true },
   { title: 'Actions', key: 'actions', sortable: false, width: 280 },
 ];
 
@@ -287,7 +291,7 @@ async function handleDelete() {
           </v-col>
         </v-row>
       </v-card-title>
-      <v-data-table-server :headers="headers" :items="ordersStore.orders" :items-length="ordersStore.total" :loading="ordersStore.loading" :page="page" :items-per-page="itemsPerPage" @update:options="onTableOptions" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
+      <v-data-table-server :headers="headers" :items="ordersStore.orders" :items-length="ordersStore.total" :loading="ordersStore.loading" :page="page" :items-per-page="itemsPerPage" v-model:sort-by="tableSortBy" @update:options="onTableOptions" class="elevation-1" show-select v-model="selectedOrders" item-value="id">
         <template v-slot:item.status="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">{{ item.status }}</v-chip>
         </template>
@@ -296,6 +300,10 @@ async function handleDelete() {
         </template>
         <template v-slot:item.depOrderId="{ item }">
           <span v-if="item.depOrderId" class="text-caption">{{ item.depOrderId }}</span>
+          <span v-else class="text-caption text-grey">--</span>
+        </template>
+        <template v-slot:item.lastUpdated="{ item }">
+          <span v-if="item.lastUpdated">{{ new Date(item.lastUpdated).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }}</span>
           <span v-else class="text-caption text-grey">--</span>
         </template>
         <template v-slot:item.createdAt="{ item }">

@@ -147,6 +147,8 @@ export interface Order {
   erpSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Most recent change across the order and its items (server-computed). */
+  lastUpdated?: string;
   deletedAt?: string;
   items?: OrderItem[];
   returnedItems?: ReturnedOrderItem[];

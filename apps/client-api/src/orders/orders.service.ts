@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
-import { eq, isNull, and, or, inArray, like, asc, desc, lt, sql, type SQL } from 'drizzle-orm';
+import { eq, isNull, and, or, inArray, like, asc, desc, lt, sql, getTableColumns, type SQL } from 'drizzle-orm';
 import { TenantDb, orders, orderItems, orderItemChanges, orderChanges, attentionDismissals, depTransactions, accounts, Order, OrderItem, OrderStatus } from '@org/database';
 import { CreateOrderDto, UpdateOrderDto, CreateOrderItemDto } from './dto/index.js';
 
@@ -159,6 +159,16 @@ export class OrdersService {
       .from(orders)
       .where(where);
 
+    // Most recent change across the order AND its items (an item add/edit/remove
+    // bumps order_items.updated_at). Falls back to created_at so it's never null.
+    const lastUpdated = sql<string>`GREATEST(
+      COALESCE(${orders.updatedAt}, ${orders.createdAt}),
+      COALESCE(
+        (SELECT MAX(${orderItems.updatedAt}) FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id}),
+        COALESCE(${orders.updatedAt}, ${orders.createdAt})
+      )
+    )`;
+
     // Whitelist of sortable columns (keys match the client's header keys).
     const sortColumns = {
       id: orders.id,
@@ -169,15 +179,17 @@ export class OrdersService {
       source: orders.source,
       depOrderId: orders.depOrderId,
       createdAt: orders.createdAt,
+      lastUpdated,
     } as const;
+    // Default to most-recently-changed first.
     const sortKey = (
-      opts.sortBy && opts.sortBy in sortColumns ? opts.sortBy : 'id'
+      opts.sortBy && opts.sortBy in sortColumns ? opts.sortBy : 'lastUpdated'
     ) as keyof typeof sortColumns;
     const sortCol = sortColumns[sortKey];
     const orderByClause = opts.sortDir === 'asc' ? asc(sortCol) : desc(sortCol);
 
     const pageRows = await db
-      .select()
+      .select({ ...getTableColumns(orders), lastUpdated })
       .from(orders)
       .where(where)
       .orderBy(orderByClause)
