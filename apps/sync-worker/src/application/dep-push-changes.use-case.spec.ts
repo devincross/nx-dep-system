@@ -14,6 +14,7 @@ function harness(opts: {
   itemChanges?: any[];
   orderChanges?: any[];
   enrollTxnId?: string | undefined;
+  txns?: any[];
 }) {
   const bulkEnrollDevices = jest.fn().mockResolvedValue({
     request: {},
@@ -37,6 +38,8 @@ function harness(opts: {
   const txnRepo: any = {
     create: jest.fn().mockResolvedValue(1),
     updateStatus: jest.fn().mockResolvedValue(undefined),
+    // Prior DEP transactions for the order. Default none (order never posted).
+    findByOrderId: jest.fn().mockResolvedValue(opts.txns ?? []),
   };
   const accountRepo: any = {
     findById: jest.fn().mockResolvedValue({ depAccountId: 'APPLE_ORG_1' }),
@@ -120,7 +123,12 @@ describe('DepPushChangesUseCase — returns un-assign devices from Apple', () =>
       changeType: 'removed',
       snapshot: { serialNumber: 'ENROLLED2', isDep: true, depStatus: 'submitted' },
     };
-    const h = harness({ order, orderChanges: [orderChange], itemChanges: [removed] });
+    // The order was already enrolled at Apple (a prior OR completed), so a
+    // field change is a genuine override.
+    const h = harness({
+      order, orderChanges: [orderChange], itemChanges: [removed],
+      txns: [{ orderType: 'OR', status: 'complete' }],
+    });
 
     await useCase.execute(
       h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, null,
@@ -128,6 +136,64 @@ describe('DepPushChangesUseCase — returns un-assign devices from Apple', () =>
 
     // OV re-sends the kept device; RE un-assigns the returned one.
     expect(submittedTypes(h.bulkEnrollDevices)).toEqual(['OV', 'RE']);
+  });
+
+  it('enrolls (OR) instead of overriding when devices are added to an order never posted to Apple', async () => {
+    // Regression for SO218950: a serial-less order (status 'waiting', never
+    // posted) gets its first devices added in the same cycle as a field change
+    // (externalOrderStatus). The 'updated' change used to route to OV, which
+    // Apple rejects with DEP-ERR-OR-4109 ("cannot override an order not posted
+    // earlier"). With no prior OR/OV on file it must enroll (OR) instead.
+    const order = {
+      id: 9,
+      accountId: 1,
+      isDep: true,
+      status: 'waiting',
+      externalOrderId: 'ORD9',
+      items: [
+        { serialNumber: 'ADDED1', isDep: true },
+        { serialNumber: 'ADDED2', isDep: true },
+      ],
+    };
+    const orderChange = { id: 90, orderId: 9, changeType: 'updated' };
+    const added = [
+      { id: 21, orderId: 9, serialNumber: 'ADDED1', changeType: 'added', snapshot: { depStatus: 'pending' } },
+      { id: 22, orderId: 9, serialNumber: 'ADDED2', changeType: 'added', snapshot: { depStatus: 'pending' } },
+    ];
+    // No prior transactions → order was never posted to Apple.
+    const h = harness({ order, orderChanges: [orderChange], itemChanges: added, txns: [] });
+
+    const result = await useCase.execute(
+      h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, null,
+    );
+
+    expect(submittedTypes(h.bulkEnrollDevices)).toEqual(['OR']);
+    expect(h.bulkEnrollDevices.mock.calls[0][1][0].deliveries[0].devices).toEqual([
+      { serialNumber: 'ADDED1' },
+      { serialNumber: 'ADDED2' },
+    ]);
+    expect(result.submitted).toBe(1);
+  });
+
+  it('still overrides (OV) when a posted order errored on a prior OV (status error does not count as posted)', async () => {
+    // An order that was genuinely posted (OR complete) then had a later OV fail
+    // must still be treated as posted — the failed OV is stored as 'error' and
+    // must not demote it to a fresh OR.
+    const order = {
+      id: 13, accountId: 1, isDep: true, status: 'error', externalOrderId: 'ORD13',
+      items: [{ serialNumber: 'KEEP13', isDep: true }],
+    };
+    const orderChange = { id: 130, orderId: 13, changeType: 'updated' };
+    const h = harness({
+      order, orderChanges: [orderChange],
+      txns: [{ orderType: 'OR', status: 'complete' }, { orderType: 'OV', status: 'error' }],
+    });
+
+    await useCase.execute(
+      h.changeRepo, h.orderRepo, h.depAdapter, h.txnRepo, h.accountRepo, null,
+    );
+
+    expect(submittedTypes(h.bulkEnrollDevices)).toEqual(['OV']);
   });
 });
 
