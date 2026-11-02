@@ -134,6 +134,14 @@ export class DepPushChangesUseCase {
           if (depItems.length === 0) {
             // All devices removed — void instead (covers any returns)
             await this.submitVoid(depAdapter, txnRepo, order, customerId, erpAdapter, orderRepo);
+          } else if (!(await this.hasBeenPostedToApple(txnRepo, order.id))) {
+            // Order was never posted to Apple (e.g. a serial-less order that
+            // only became DEP-eligible once devices were just added, arriving
+            // alongside a field change). There is nothing to override — an OV
+            // would fail with DEP-ERR-OR-4109 ("you cannot override an order if
+            // it has not been posted earlier"). Enroll (OR) instead, the same
+            // as a brand-new 'created' order.
+            await this.submitEnroll(depAdapter, txnRepo, order, depItems, customerId, orderRepo, erpAdapter);
           } else {
             await this.submitOverride(depAdapter, txnRepo, order, depItems, customerId, orderRepo, erpAdapter);
             // OV re-sends the remaining devices but does not un-assign the
@@ -190,6 +198,26 @@ export class DepPushChangesUseCase {
   }
 
   // ---- Submit helpers ----
+
+  /**
+   * True if Apple has ever accepted an enroll/override for this order — a prior
+   * OR/OV transaction that reached in_progress, posted_with_errors, or complete.
+   * Only then is the order "posted" at Apple and overridable (OV) or voidable
+   * (VD); otherwise Apple rejects with DEP-ERR-OR-4109 and it must be enrolled
+   * (OR) first. A rejected OV is stored as status 'error', so it correctly does
+   * not count as posted.
+   */
+  private async hasBeenPostedToApple(
+    txnRepo: DepTransactionRepository,
+    orderId: number,
+  ): Promise<boolean> {
+    const txns = await txnRepo.findByOrderId(orderId);
+    return txns.some(
+      (t) =>
+        (t.orderType === 'OR' || t.orderType === 'OV') &&
+        (t.status === 'in_progress' || t.status === 'posted_with_errors' || t.status === 'complete'),
+    );
+  }
 
   private async submitEnroll(
     adapter: DepSyncAdapter,
